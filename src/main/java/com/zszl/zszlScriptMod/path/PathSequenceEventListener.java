@@ -359,6 +359,10 @@ public class PathSequenceEventListener {
     private String hotbarUseItemName = "";
     private AutoUseItemRule.MatchMode hotbarUseMatchMode = AutoUseItemRule.MatchMode.CONTAINS;
     private AutoUseItemRule.UseMode hotbarUseMode = AutoUseItemRule.UseMode.RIGHT_CLICK;
+    private boolean hotbarUseChangeLocalSlot = false;
+    private int hotbarUseSwitchItemDelayTicks = 0;
+    private int hotbarUseSwitchDelayTicks = 0;
+    private int hotbarUseSwitchBackDelayTicks = 0;
     private int hotbarUseRemainingCount = 0;
     private int hotbarUseIntervalTicks = 0;
     private int hotbarUseWaitTicks = 0;
@@ -1670,6 +1674,10 @@ public class PathSequenceEventListener {
         this.hotbarUseItemName = "";
         this.hotbarUseMatchMode = AutoUseItemRule.MatchMode.CONTAINS;
         this.hotbarUseMode = AutoUseItemRule.UseMode.RIGHT_CLICK;
+        this.hotbarUseChangeLocalSlot = false;
+        this.hotbarUseSwitchItemDelayTicks = 0;
+        this.hotbarUseSwitchDelayTicks = 0;
+        this.hotbarUseSwitchBackDelayTicks = 0;
         this.hotbarUseRemainingCount = 0;
         this.hotbarUseIntervalTicks = 0;
         this.hotbarUseWaitTicks = 0;
@@ -3526,6 +3534,20 @@ public class PathSequenceEventListener {
                     && "LEFT_CLICK".equalsIgnoreCase(actionData.params.get("useMode").getAsString())
                             ? AutoUseItemRule.UseMode.LEFT_CLICK
                             : AutoUseItemRule.UseMode.RIGHT_CLICK;
+            this.hotbarUseChangeLocalSlot = actionData.params.has("changeLocalSlot")
+                    && actionData.params.get("changeLocalSlot").getAsBoolean();
+            this.hotbarUseSwitchItemDelayTicks = Math.max(0,
+                    actionData.params.has("switchItemDelayTicks")
+                            ? actionData.params.get("switchItemDelayTicks").getAsInt()
+                            : 0);
+            this.hotbarUseSwitchDelayTicks = Math.max(0,
+                    actionData.params.has("switchDelayTicks")
+                            ? actionData.params.get("switchDelayTicks").getAsInt()
+                            : 0);
+            this.hotbarUseSwitchBackDelayTicks = Math.max(0,
+                    actionData.params.has("switchBackDelayTicks")
+                            ? actionData.params.get("switchBackDelayTicks").getAsInt()
+                            : 0);
             this.hotbarUseRemainingCount = Math.max(1,
                     actionData.params.has("count") ? actionData.params.get("count").getAsInt() : 1);
             this.hotbarUseIntervalTicks = Math.max(0,
@@ -3545,7 +3567,8 @@ public class PathSequenceEventListener {
         if (hotbarUseIntervalTicks <= 0) {
             while (hotbarUseRemainingCount > 0) {
                 boolean ok = AutoUseItemHandler.INSTANCE.useMatchingHotbarItem(player, hotbarUseItemName,
-                        hotbarUseMatchMode, hotbarUseMode);
+                        hotbarUseMatchMode, hotbarUseMode, hotbarUseChangeLocalSlot,
+                        hotbarUseSwitchItemDelayTicks, hotbarUseSwitchDelayTicks, hotbarUseSwitchBackDelayTicks);
                 hotbarUseRemainingCount--;
                 if (!ok) {
                     break;
@@ -3564,7 +3587,8 @@ public class PathSequenceEventListener {
         }
 
         boolean ok = AutoUseItemHandler.INSTANCE.useMatchingHotbarItem(player, hotbarUseItemName,
-                hotbarUseMatchMode, hotbarUseMode);
+                hotbarUseMatchMode, hotbarUseMode, hotbarUseChangeLocalSlot,
+                hotbarUseSwitchItemDelayTicks, hotbarUseSwitchDelayTicks, hotbarUseSwitchBackDelayTicks);
         hotbarUseRemainingCount--;
 
         if (!ok || hotbarUseRemainingCount <= 0) {

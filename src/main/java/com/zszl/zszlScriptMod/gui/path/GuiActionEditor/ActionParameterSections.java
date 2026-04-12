@@ -279,8 +279,23 @@ final class ActionParameterSections {
                         ? editor.currentParams.get("useMode").getAsString()
                         : "RIGHT_CLICK"));
         currentY += 40;
+        editor.addToggle(I18n.format("gui.path.action_editor.label.change_local_slot"), "changeLocalSlot",
+                I18n.format("gui.path.action_editor.help.change_local_slot"), fieldWidth, x, currentY,
+                editor.currentParams.has("changeLocalSlot") && editor.currentParams.get("changeLocalSlot").getAsBoolean(),
+                I18n.format("path.common.on"), I18n.format("path.common.off"));
+        currentY += 40;
         editor.addTextField(I18n.format("gui.path.action_editor.label.use_count"), "count",
                 I18n.format("gui.path.action_editor.help.use_count"), fieldWidth, x, currentY, "1");
+        currentY += 40;
+        editor.addTextField(I18n.format("gui.path.action_editor.label.switch_item_delay_ticks"), "switchItemDelayTicks",
+                I18n.format("gui.path.action_editor.help.switch_item_delay_ticks"), fieldWidth, x, currentY, "0");
+        currentY += 40;
+        editor.addTextField(I18n.format("gui.path.action_editor.label.use_item_delay_ticks"), "switchDelayTicks",
+                I18n.format("gui.path.action_editor.help.use_item_delay_ticks"), fieldWidth, x, currentY, "0");
+        currentY += 40;
+        editor.addTextField(I18n.format("gui.path.action_editor.label.switch_back_delay_ticks"),
+                "switchBackDelayTicks",
+                I18n.format("gui.path.action_editor.help.switch_back_delay_ticks"), fieldWidth, x, currentY, "0");
         currentY += 40;
         editor.addTextField(I18n.format("gui.path.action_editor.label.use_interval_ticks"), "intervalTicks",
                 I18n.format("gui.path.action_editor.help.use_interval_ticks"), fieldWidth, x, currentY, "0");

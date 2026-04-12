@@ -96,6 +96,7 @@ public class AutoUseItemHandler {
                         if (rule.useMode == null) {
                             rule.useMode = AutoUseItemRule.UseMode.RIGHT_CLICK;
                         }
+                        rule.switchItemDelayTicks = Math.max(0, rule.switchItemDelayTicks);
                         rule.switchDelayTicks = Math.max(0, rule.switchDelayTicks);
                         rule.restoreDelayTicks = Math.max(0, rule.restoreDelayTicks);
                         rule.category = normalizeCategory(rule.category);
@@ -301,7 +302,8 @@ public class AutoUseItemHandler {
                 continue;
             }
 
-            if (useHotbarItemSilently(mc.player, slot, rule.useMode, rule.switchDelayTicks, rule.restoreDelayTicks)) {
+            if (useHotbarItemSilently(mc.player, slot, rule.useMode, rule.changeLocalSlot,
+                    rule.switchItemDelayTicks, rule.switchDelayTicks, rule.restoreDelayTicks)) {
                 rule.lastUseAtMs = now;
                 if (interval < minWaitMs) {
                     minWaitMs = interval;
@@ -362,12 +364,19 @@ public class AutoUseItemHandler {
 
     public boolean useMatchingHotbarItem(EntityPlayerSP player, String itemName,
             AutoUseItemRule.MatchMode matchMode, AutoUseItemRule.UseMode useMode) {
-        return useMatchingHotbarItem(player, itemName, matchMode, useMode, 0, 0);
+        return useMatchingHotbarItem(player, itemName, matchMode, useMode, false, 0, 0, 0);
     }
 
     public boolean useMatchingHotbarItem(EntityPlayerSP player, String itemName,
             AutoUseItemRule.MatchMode matchMode, AutoUseItemRule.UseMode useMode,
             int switchDelayTicks, int restoreDelayTicks) {
+        return useMatchingHotbarItem(player, itemName, matchMode, useMode, false, 0, switchDelayTicks,
+                restoreDelayTicks);
+    }
+
+    public boolean useMatchingHotbarItem(EntityPlayerSP player, String itemName,
+            AutoUseItemRule.MatchMode matchMode, AutoUseItemRule.UseMode useMode,
+            boolean changeLocalSlot, int switchItemDelayTicks, int switchDelayTicks, int restoreDelayTicks) {
         if (player == null || player.connection == null) {
             return false;
         }
@@ -380,7 +389,15 @@ public class AutoUseItemHandler {
         AutoUseItemRule.UseMode safeUseMode = useMode == null
                 ? AutoUseItemRule.UseMode.RIGHT_CLICK
                 : useMode;
-        return useHotbarItemSilently(player, slot, safeUseMode, switchDelayTicks, restoreDelayTicks);
+        return useHotbarItemSilently(player, slot, safeUseMode,
+                changeLocalSlot, switchItemDelayTicks, switchDelayTicks, restoreDelayTicks);
+    }
+
+    public boolean useMatchingHotbarItem(EntityPlayerSP player, String itemName,
+            AutoUseItemRule.MatchMode matchMode, AutoUseItemRule.UseMode useMode,
+            int switchItemDelayTicks, int switchDelayTicks, int restoreDelayTicks) {
+        return useMatchingHotbarItem(player, itemName, matchMode, useMode, false,
+                switchItemDelayTicks, switchDelayTicks, restoreDelayTicks);
     }
 
     private int findMatchedHotbarSlot(AutoUseItemRule rule) {
@@ -408,7 +425,7 @@ public class AutoUseItemHandler {
     }
 
     private boolean useHotbarItemSilently(EntityPlayerSP player, int targetSlot, AutoUseItemRule.UseMode useMode,
-            int switchDelayTicks, int restoreDelayTicks) {
+            boolean changeLocalSlot, int switchItemDelayTicks, int switchDelayTicks, int restoreDelayTicks) {
         if (player == null || player.connection == null || targetSlot < 0 || targetSlot >= 9) {
             return false;
         }
@@ -426,46 +443,62 @@ public class AutoUseItemHandler {
             AutoUseItemRule.UseMode safeUseMode = useMode == null
                     ? AutoUseItemRule.UseMode.RIGHT_CLICK
                     : useMode;
+            int safeSwitchItemDelayTicks = Math.max(0, switchItemDelayTicks);
             int safeSwitchDelayTicks = Math.max(0, switchDelayTicks);
             int safeRestoreDelayTicks = Math.max(0, restoreDelayTicks);
 
-            player.inventory.currentItem = targetSlot;
+            if (originalSlot != targetSlot && safeSwitchItemDelayTicks > 0) {
+                beginHotbarSlotSwitch(player, originalSlot, targetSlot, safeUseMode, changeLocalSlot,
+                        safeSwitchDelayTicks, safeRestoreDelayTicks, safeSwitchItemDelayTicks);
+                return true;
+            }
+
             if (originalSlot != targetSlot) {
+                if (changeLocalSlot) {
+                    player.inventory.currentItem = targetSlot;
+                }
                 player.connection.sendPacket(new CPacketHeldItemChange(targetSlot));
             }
 
             if (safeSwitchDelayTicks > 0) {
-                beginHotbarUseAction(player, originalSlot, targetSlot, safeUseMode, safeSwitchDelayTicks,
-                        safeRestoreDelayTicks);
+                beginHotbarUseAction(player, originalSlot, targetSlot, safeUseMode, changeLocalSlot,
+                        safeSwitchDelayTicks, safeRestoreDelayTicks);
                 return true;
             }
 
-            return executeHotbarUseAction(player, originalSlot, targetSlot, safeUseMode, safeRestoreDelayTicks);
+            return executeHotbarUseAction(player, originalSlot, targetSlot, safeUseMode, changeLocalSlot,
+                    safeRestoreDelayTicks);
         } catch (Exception e) {
-            player.inventory.currentItem = originalSlot;
+            if (changeLocalSlot) {
+                player.inventory.currentItem = originalSlot;
+            }
             zszlScriptMod.LOGGER.debug("静默使用物品发包失败: {}", e.getMessage());
             clearPendingHotbarUseAction();
             return false;
         }
     }
 
-    private void beginHotbarUseAction(EntityPlayerSP player, int originalSlot, int targetSlot,
-            AutoUseItemRule.UseMode useMode, int switchDelayTicks, int restoreDelayTicks) {
+    private void beginHotbarSlotSwitch(EntityPlayerSP player, int originalSlot, int targetSlot,
+            AutoUseItemRule.UseMode useMode, boolean changeLocalSlot,
+            int switchDelayTicks, int restoreDelayTicks, int switchItemDelayTicks) {
         this.hotbarUseActionPending = true;
         final int token = ++this.hotbarUseActionToken;
 
         if (ModUtils.DelayScheduler.instance == null) {
-            executeDelayedHotbarUseAction(player, originalSlot, targetSlot, useMode, restoreDelayTicks, token);
+            executeDelayedHotbarSlotSwitch(player, originalSlot, targetSlot, useMode, changeLocalSlot,
+                    switchDelayTicks, restoreDelayTicks, token);
             return;
         }
 
         ModUtils.DelayScheduler.instance.schedule(
-                () -> executeDelayedHotbarUseAction(player, originalSlot, targetSlot, useMode, restoreDelayTicks, token),
-                switchDelayTicks);
+                () -> executeDelayedHotbarSlotSwitch(player, originalSlot, targetSlot, useMode, changeLocalSlot,
+                        switchDelayTicks, restoreDelayTicks, token),
+                switchItemDelayTicks);
     }
 
-    private void executeDelayedHotbarUseAction(EntityPlayerSP player, int originalSlot, int targetSlot,
-            AutoUseItemRule.UseMode useMode, int restoreDelayTicks, int token) {
+    private void executeDelayedHotbarSlotSwitch(EntityPlayerSP player, int originalSlot, int targetSlot,
+            AutoUseItemRule.UseMode useMode, boolean changeLocalSlot,
+            int switchDelayTicks, int restoreDelayTicks, int token) {
         if (!isHotbarUseActionTokenActive(token)) {
             return;
         }
@@ -476,13 +509,69 @@ public class AutoUseItemHandler {
             return;
         }
 
-        if (player.inventory.currentItem != targetSlot) {
-            player.inventory.currentItem = targetSlot;
+        if (originalSlot != targetSlot) {
+            if (changeLocalSlot) {
+                player.inventory.currentItem = targetSlot;
+            }
             player.connection.sendPacket(new CPacketHeldItemChange(targetSlot));
         }
 
-        if (!executeHotbarUseAction(player, originalSlot, targetSlot, useMode, restoreDelayTicks)) {
-            player.inventory.currentItem = originalSlot;
+        if (switchDelayTicks > 0) {
+            beginHotbarUseAction(player, originalSlot, targetSlot, useMode, changeLocalSlot,
+                    switchDelayTicks, restoreDelayTicks);
+            return;
+        }
+
+        if (!executeHotbarUseAction(player, originalSlot, targetSlot, useMode, changeLocalSlot, restoreDelayTicks)) {
+            if (changeLocalSlot) {
+                player.inventory.currentItem = originalSlot;
+            }
+            if (originalSlot != targetSlot && player.connection != null) {
+                player.connection.sendPacket(new CPacketHeldItemChange(originalSlot));
+            }
+        }
+    }
+
+    private void beginHotbarUseAction(EntityPlayerSP player, int originalSlot, int targetSlot,
+            AutoUseItemRule.UseMode useMode, boolean changeLocalSlot, int switchDelayTicks, int restoreDelayTicks) {
+        this.hotbarUseActionPending = true;
+        final int token = ++this.hotbarUseActionToken;
+
+        if (ModUtils.DelayScheduler.instance == null) {
+            executeDelayedHotbarUseAction(player, originalSlot, targetSlot, useMode, changeLocalSlot,
+                    restoreDelayTicks, token);
+            return;
+        }
+
+        ModUtils.DelayScheduler.instance.schedule(
+                () -> executeDelayedHotbarUseAction(player, originalSlot, targetSlot, useMode, changeLocalSlot,
+                        restoreDelayTicks, token),
+                switchDelayTicks);
+    }
+
+    private void executeDelayedHotbarUseAction(EntityPlayerSP player, int originalSlot, int targetSlot,
+            AutoUseItemRule.UseMode useMode, boolean changeLocalSlot, int restoreDelayTicks, int token) {
+        if (!isHotbarUseActionTokenActive(token)) {
+            return;
+        }
+        clearPendingHotbarUseAction();
+
+        if (player == null || mc.player != player || player.connection == null) {
+            clearPendingHotbarUseRestore();
+            return;
+        }
+
+        if (originalSlot != targetSlot) {
+            if (changeLocalSlot) {
+                player.inventory.currentItem = targetSlot;
+            }
+            player.connection.sendPacket(new CPacketHeldItemChange(targetSlot));
+        }
+
+        if (!executeHotbarUseAction(player, originalSlot, targetSlot, useMode, changeLocalSlot, restoreDelayTicks)) {
+            if (changeLocalSlot) {
+                player.inventory.currentItem = originalSlot;
+            }
             if (originalSlot != targetSlot && player.connection != null) {
                 player.connection.sendPacket(new CPacketHeldItemChange(originalSlot));
             }
@@ -490,7 +579,7 @@ public class AutoUseItemHandler {
     }
 
     private boolean executeHotbarUseAction(EntityPlayerSP player, int originalSlot, int targetSlot,
-            AutoUseItemRule.UseMode useMode, int restoreDelayTicks) {
+            AutoUseItemRule.UseMode useMode, boolean changeLocalSlot, int restoreDelayTicks) {
         ItemStack targetStack = player.inventory.getStackInSlot(targetSlot);
         if (targetStack == null || targetStack.isEmpty()) {
             return false;
@@ -501,14 +590,16 @@ public class AutoUseItemHandler {
                 : useMode;
 
         if (safeUseMode == AutoUseItemRule.UseMode.LEFT_CLICK) {
-            player.swingArm(EnumHand.MAIN_HAND);
+            if (changeLocalSlot) {
+                player.swingArm(EnumHand.MAIN_HAND);
+            }
             player.connection.sendPacket(new CPacketAnimation(EnumHand.MAIN_HAND));
-            restoreHotbarSlotNow(player, originalSlot, targetSlot, 0);
+            restoreHotbarSlotNow(player, originalSlot, targetSlot, changeLocalSlot, 0);
             return true;
         }
 
         boolean triggered = false;
-        if (mc.playerController != null && player.world != null) {
+        if ((changeLocalSlot || originalSlot == targetSlot) && mc.playerController != null && player.world != null) {
             EnumActionResult result = mc.playerController.processRightClick(player, player.world, EnumHand.MAIN_HAND);
             triggered = result != EnumActionResult.FAIL;
         }
@@ -522,7 +613,7 @@ public class AutoUseItemHandler {
             return false;
         }
 
-        beginHotbarUseRestore(player, originalSlot, targetSlot,
+        beginHotbarUseRestore(player, originalSlot, targetSlot, changeLocalSlot,
                 getHotbarUseRestoreTimeoutTicks(targetStack, safeUseMode, restoreDelayTicks));
         return true;
     }
@@ -548,25 +639,28 @@ public class AutoUseItemHandler {
         return 1;
     }
 
-    private void beginHotbarUseRestore(EntityPlayerSP player, int originalSlot, int targetSlot, int restoreTimeoutTicks) {
+    private void beginHotbarUseRestore(EntityPlayerSP player, int originalSlot, int targetSlot,
+            boolean changeLocalSlot, int restoreTimeoutTicks) {
         this.hotbarUseRestorePending = true;
         final int token = ++this.hotbarUseRestoreToken;
 
         if (ModUtils.DelayScheduler.instance == null) {
-            restoreHotbarSlotNow(player, originalSlot, targetSlot, token);
+            restoreHotbarSlotNow(player, originalSlot, targetSlot, changeLocalSlot, token);
             return;
         }
 
-        scheduleHotbarRestorePoll(player, originalSlot, targetSlot, Math.max(0, restoreTimeoutTicks), token);
+        scheduleHotbarRestorePoll(player, originalSlot, targetSlot, changeLocalSlot,
+                Math.max(0, restoreTimeoutTicks), token);
     }
 
-    private void scheduleHotbarRestorePoll(EntityPlayerSP player, int originalSlot, int targetSlot, int remainingTicks,
-            int token) {
+    private void scheduleHotbarRestorePoll(EntityPlayerSP player, int originalSlot, int targetSlot,
+            boolean changeLocalSlot, int remainingTicks, int token) {
         ModUtils.DelayScheduler.instance.schedule(
-                () -> pollHotbarRestore(player, originalSlot, targetSlot, remainingTicks, token), 1);
+                () -> pollHotbarRestore(player, originalSlot, targetSlot, changeLocalSlot, remainingTicks, token), 1);
     }
 
-    private void pollHotbarRestore(EntityPlayerSP player, int originalSlot, int targetSlot, int remainingTicks, int token) {
+    private void pollHotbarRestore(EntityPlayerSP player, int originalSlot, int targetSlot,
+            boolean changeLocalSlot, int remainingTicks, int token) {
         if (!isHotbarRestoreTokenActive(token)) {
             return;
         }
@@ -577,22 +671,24 @@ public class AutoUseItemHandler {
 
         boolean stillUsing = player.isHandActive() && player.inventory.currentItem == targetSlot;
         if (stillUsing || remainingTicks > 0) {
-            scheduleHotbarRestorePoll(player, originalSlot, targetSlot, Math.max(0, remainingTicks - 1), token);
+            scheduleHotbarRestorePoll(player, originalSlot, targetSlot, changeLocalSlot,
+                    Math.max(0, remainingTicks - 1), token);
             return;
         }
 
-        restoreHotbarSlotNow(player, originalSlot, targetSlot, token);
+        restoreHotbarSlotNow(player, originalSlot, targetSlot, changeLocalSlot, token);
     }
 
-    private void restoreHotbarSlotNow(EntityPlayerSP player, int originalSlot, int targetSlot, int token) {
+    private void restoreHotbarSlotNow(EntityPlayerSP player, int originalSlot, int targetSlot,
+            boolean changeLocalSlot, int token) {
         if (token != 0 && !isHotbarRestoreTokenActive(token)) {
             return;
         }
-        if (player != null && originalSlot != targetSlot) {
-            player.inventory.currentItem = originalSlot;
-            if (player.connection != null) {
-                player.connection.sendPacket(new CPacketHeldItemChange(originalSlot));
+        if (player != null && originalSlot != targetSlot && player.connection != null) {
+            if (changeLocalSlot) {
+                player.inventory.currentItem = originalSlot;
             }
+            player.connection.sendPacket(new CPacketHeldItemChange(originalSlot));
         }
         clearPendingHotbarUseRestore();
     }

@@ -17,18 +17,22 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
     private static final int BTN_TOGGLE_ENABLED = 2101;
     private static final int BTN_TOGGLE_USE_MODE = 2102;
     private static final int BTN_TOGGLE_MATCH_MODE = 2103;
+    private static final int BTN_TOGGLE_CHANGE_LOCAL_SLOT = 2104;
 
     private GuiTextField nameField;
     private GuiTextField categoryField;
     private GuiTextField intervalField;
+    private GuiTextField switchItemDelayField;
     private GuiTextField switchDelayField;
     private GuiTextField restoreDelayField;
 
     private GuiButton btnToggleEnabled;
     private GuiButton btnToggleUseMode;
     private GuiButton btnToggleMatchMode;
+    private GuiButton btnToggleChangeLocalSlot;
 
     private boolean editorEnabled = true;
+    private boolean editorChangeLocalSlot = false;
     private AutoUseItemRule.UseMode editorUseMode = AutoUseItemRule.UseMode.RIGHT_CLICK;
     private AutoUseItemRule.MatchMode editorMatchMode = AutoUseItemRule.MatchMode.CONTAINS;
 
@@ -121,9 +125,11 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
         copy.name = source.name;
         copy.category = source.category;
         copy.enabled = source.enabled;
+        copy.changeLocalSlot = source.changeLocalSlot;
         copy.useMode = source.useMode;
         copy.matchMode = source.matchMode;
         copy.intervalMs = source.intervalMs;
+        copy.switchItemDelayTicks = source.switchItemDelayTicks;
         copy.switchDelayTicks = source.switchDelayTicks;
         copy.restoreDelayTicks = source.restoreDelayTicks;
         copy.lastUseAtMs = 0L;
@@ -171,10 +177,12 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
         setText(nameField, safe(rule.name));
         setText(categoryField, normalizeCategory(rule.category));
         setText(intervalField, String.valueOf(Math.max(10, rule.intervalMs)));
+        setText(switchItemDelayField, String.valueOf(Math.max(0, rule.switchItemDelayTicks)));
         setText(switchDelayField, String.valueOf(Math.max(0, rule.switchDelayTicks)));
         setText(restoreDelayField, String.valueOf(Math.max(0, rule.restoreDelayTicks)));
 
         editorEnabled = rule.enabled;
+        editorChangeLocalSlot = rule.changeLocalSlot;
         editorUseMode = rule.useMode == null ? AutoUseItemRule.UseMode.RIGHT_CLICK : rule.useMode;
         editorMatchMode = rule.matchMode == null ? AutoUseItemRule.MatchMode.CONTAINS : rule.matchMode;
 
@@ -187,9 +195,11 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
         base.name = safe(nameField.getText()).trim();
         base.category = normalizeCategory(categoryField.getText());
         base.enabled = editorEnabled;
+        base.changeLocalSlot = editorChangeLocalSlot;
         base.useMode = editorUseMode == null ? AutoUseItemRule.UseMode.RIGHT_CLICK : editorUseMode;
         base.matchMode = editorMatchMode == null ? AutoUseItemRule.MatchMode.CONTAINS : editorMatchMode;
         base.intervalMs = Math.max(10, parseInt(intervalField.getText(), base.intervalMs));
+        base.switchItemDelayTicks = Math.max(0, parseInt(switchItemDelayField.getText(), base.switchItemDelayTicks));
         base.switchDelayTicks = Math.max(0, parseInt(switchDelayField.getText(), base.switchDelayTicks));
         base.restoreDelayTicks = Math.max(0, parseInt(restoreDelayField.getText(), base.restoreDelayTicks));
         base.lastUseAtMs = 0L;
@@ -204,9 +214,11 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
         target.name = source.name;
         target.category = normalizeCategory(source.category);
         target.enabled = source.enabled;
+        target.changeLocalSlot = source.changeLocalSlot;
         target.useMode = source.useMode;
         target.matchMode = source.matchMode;
         target.intervalMs = Math.max(10, source.intervalMs);
+        target.switchItemDelayTicks = Math.max(0, source.switchItemDelayTicks);
         target.switchDelayTicks = Math.max(0, source.switchDelayTicks);
         target.restoreDelayTicks = Math.max(0, source.restoreDelayTicks);
         target.lastUseAtMs = 0L;
@@ -217,8 +229,9 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
         nameField = createField(3101);
         categoryField = createField(3102);
         intervalField = createField(3103);
-        switchDelayField = createField(3104);
-        restoreDelayField = createField(3105);
+        switchItemDelayField = createField(3104);
+        switchDelayField = createField(3105);
+        restoreDelayField = createField(3106);
     }
 
     @Override
@@ -226,10 +239,12 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
         btnToggleEnabled = new ThemedButton(BTN_TOGGLE_ENABLED, 0, 0, 100, 20, "");
         btnToggleUseMode = new ThemedButton(BTN_TOGGLE_USE_MODE, 0, 0, 100, 20, "");
         btnToggleMatchMode = new ThemedButton(BTN_TOGGLE_MATCH_MODE, 0, 0, 100, 20, "");
+        btnToggleChangeLocalSlot = new ThemedButton(BTN_TOGGLE_CHANGE_LOCAL_SLOT, 0, 0, 100, 20, "");
 
         this.buttonList.add(btnToggleEnabled);
         this.buttonList.add(btnToggleUseMode);
         this.buttonList.add(btnToggleMatchMode);
+        this.buttonList.add(btnToggleChangeLocalSlot);
     }
 
     @Override
@@ -242,9 +257,11 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
         placeButton(btnToggleEnabled, 2, editorFieldX, fullFieldWidth, 20);
         placeButton(btnToggleUseMode, 3, editorFieldX, fullFieldWidth, 20);
         placeButton(btnToggleMatchMode, 4, editorFieldX, fullFieldWidth, 20);
-        placeField(intervalField, 5, editorFieldX, Math.max(100, fullFieldWidth / 2));
-        placeField(switchDelayField, 6, editorFieldX, Math.max(100, fullFieldWidth / 2));
-        placeField(restoreDelayField, 7, editorFieldX, Math.max(100, fullFieldWidth / 2));
+        placeButton(btnToggleChangeLocalSlot, 5, editorFieldX, fullFieldWidth, 20);
+        placeField(intervalField, 6, editorFieldX, Math.max(100, fullFieldWidth / 2));
+        placeField(switchItemDelayField, 7, editorFieldX, Math.max(100, fullFieldWidth / 2));
+        placeField(switchDelayField, 8, editorFieldX, Math.max(100, fullFieldWidth / 2));
+        placeField(restoreDelayField, 9, editorFieldX, Math.max(100, fullFieldWidth / 2));
     }
 
     @Override
@@ -254,7 +271,7 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
 
     @Override
     protected int getEditorTotalRows() {
-        return 8;
+        return 10;
     }
 
     @Override
@@ -271,10 +288,14 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
             case 4:
                 return "名称匹配";
             case 5:
-                return I18n.format("gui.autouseitem.edit.interval");
+                return "更改本地物品槽位";
             case 6:
-                return "切换后延迟 Tick";
+                return I18n.format("gui.autouseitem.edit.interval");
             case 7:
+                return "切换物品延迟 Tick";
+            case 8:
+                return "切换后延迟 Tick";
+            case 9:
                 return "右键切回延迟 Tick";
             default:
                 return "";
@@ -287,6 +308,7 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
         fields.add(nameField);
         fields.add(categoryField);
         fields.add(intervalField);
+        fields.add(switchItemDelayField);
         fields.add(switchDelayField);
         fields.add(restoreDelayField);
         return fields;
@@ -316,11 +338,14 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
         drawString(fontRenderer, trimToWidth("分类: " + normalizeCategory(item.category), width - 12),
                 x + 6, y + 18, 0xFFDDDDDD);
         drawString(fontRenderer,
-                trimToWidth("使用: " + useModeText(item.useMode) + "  匹配: " + matchModeText(item.matchMode), width - 12),
+                trimToWidth("使用: " + useModeText(item.useMode) + "  匹配: " + matchModeText(item.matchMode)
+                        + "  本地槽: " + onOff(item.changeLocalSlot), width - 12),
                 x + 6, y + 31, 0xFFBDBDBD);
         drawString(fontRenderer,
-                trimToWidth("间隔: " + Math.max(10, item.intervalMs) + " ms  切换: "
-                        + Math.max(0, item.switchDelayTicks) + "t  切回: " + Math.max(0, item.restoreDelayTicks) + "t",
+                trimToWidth("间隔: " + Math.max(10, item.intervalMs) + " ms  切物: "
+                        + Math.max(0, item.switchItemDelayTicks) + "t  切后: "
+                        + Math.max(0, item.switchDelayTicks) + "t  切回: "
+                        + Math.max(0, item.restoreDelayTicks) + "t",
                         width - 12),
                 x + 6, y + 44, 0xFFB8C7D9);
     }
@@ -335,6 +360,9 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
         }
         if (item.intervalMs < 10) {
             return "间隔不能小于 10ms";
+        }
+        if (item.switchItemDelayTicks < 0) {
+            return "切换物品延迟不能小于 0 tick";
         }
         if (item.switchDelayTicks < 0) {
             return "切换后延迟不能小于 0 tick";
@@ -360,6 +388,10 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
                     matchModeText(editorMatchMode));
             btnToggleMatchMode.enabled = btnToggleMatchMode.visible;
         }
+        if (btnToggleChangeLocalSlot != null) {
+            btnToggleChangeLocalSlot.displayString = "更改本地物品槽位: " + onOff(editorChangeLocalSlot);
+            btnToggleChangeLocalSlot.enabled = btnToggleChangeLocalSlot.visible;
+        }
     }
 
     @Override
@@ -380,6 +412,11 @@ public class GuiAutoUseItemConfig extends AbstractThreePaneRuleManager<AutoUseIt
             editorMatchMode = (editorMatchMode == AutoUseItemRule.MatchMode.EXACT)
                     ? AutoUseItemRule.MatchMode.CONTAINS
                     : AutoUseItemRule.MatchMode.EXACT;
+            updateEditorButtonStates();
+            return true;
+        }
+        if (button.id == BTN_TOGGLE_CHANGE_LOCAL_SLOT) {
+            editorChangeLocalSlot = !editorChangeLocalSlot;
             updateEditorButtonStates();
             return true;
         }

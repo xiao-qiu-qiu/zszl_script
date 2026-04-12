@@ -460,6 +460,12 @@ public final class PathConfigValidator {
                 break;
             case "use_hotbar_item":
                 validatePositiveIntParam(sequenceName, stepIndex, actionIndex, params, "count", "使用次数", 1, issues);
+                validateNonNegativeIntParam(sequenceName, stepIndex, actionIndex, params, "switchItemDelayTicks",
+                        "切换物品延迟", issues);
+                validateNonNegativeIntParam(sequenceName, stepIndex, actionIndex, params, "switchDelayTicks",
+                        "切后使用延迟", issues);
+                validateNonNegativeIntParam(sequenceName, stepIndex, actionIndex, params, "switchBackDelayTicks",
+                        "切回延迟", issues);
                 validateNonNegativeIntParam(sequenceName, stepIndex, actionIndex, params, "intervalTicks", "使用间隔",
                         issues);
                 break;

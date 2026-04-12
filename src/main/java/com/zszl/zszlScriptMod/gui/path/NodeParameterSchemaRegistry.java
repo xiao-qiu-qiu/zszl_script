@@ -511,8 +511,17 @@ public final class NodeParameterSchemaRegistry {
                         schemas.add(FieldSchema.paramsField("useMode", "使用方式", FieldType.SELECT, false,
                                         "RIGHT_CLICK=右键使用；LEFT_CLICK=左键动作。", "RIGHT_CLICK / LEFT_CLICK",
                                         "RIGHT_CLICK", "RIGHT_CLICK", "LEFT_CLICK"));
+                        schemas.add(FieldSchema.paramsField("changeLocalSlot", "更改本地物品槽位", FieldType.BOOLEAN,
+                                        false, "true=同步修改客户端本地选中的快捷栏槽位；false=仅发包不改本地显示。", "true / false",
+                                        "false"));
                         schemas.add(FieldSchema.paramsField("count", "使用次数", FieldType.NUMBER, false,
                                         "至少 1。", ">= 1", "1"));
+                        schemas.add(FieldSchema.paramsField("switchItemDelayTicks", "切换物品延迟", FieldType.NUMBER,
+                                        false, "切到目标快捷栏物品前先等待多少 ticks。", ">= 0", "0"));
+                        schemas.add(FieldSchema.paramsField("switchDelayTicks", "切后使用延迟", FieldType.NUMBER,
+                                        false, "切到目标快捷栏物品后等待多少 ticks 再使用。", ">= 0", "0"));
+                        schemas.add(FieldSchema.paramsField("switchBackDelayTicks", "切回延迟", FieldType.NUMBER,
+                                        false, "使用后等待多少 ticks 再切回原物品。", ">= 0", "0"));
                         schemas.add(FieldSchema.paramsField("intervalTicks", "使用间隔", FieldType.NUMBER, false,
                                         "多次使用之间的 tick 间隔。", ">= 0", "0"));
                 } else if ("move_inventory_item_to_hotbar".equals(normalized)) {

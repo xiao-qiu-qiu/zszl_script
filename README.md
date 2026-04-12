@@ -3,7 +3,8 @@
 ![Minecraft](https://img.shields.io/badge/Minecraft-1.12.2-brightgreen.svg)
 ![Forge](https://img.shields.io/badge/Forge-14.23.5.2860-red.svg)
 
-[![QQ](https://img.shields.io/badge/QQ-交流群-12B7F5?logo=tencentqq&logoColor=white)]([https://qm.qq.com/cgi-bin/qm/qr?k=KpXtB7PNkQYan3sAx-eO4_wa8x9BIRhF](https://qm.qq.com/cgi-bin/qm/qr?k=KpXtB7PNkQYan3sAx-eO4_wa8x9BIRhF&jump_from=webapi&authKey=X/HJE1j5AIGgsOP4zT/8r1SsTD6ptqo4A9/PmbJeeWd3lBolMoNWpCuDHyzxrQTj))
+[![QQ](https://img.shields.io/badge/QQ-交流群-12B7F5?logo=tencentqq&logoColor=white)](https://qm.qq.com/cgi-bin/qm/qr?k=KpXtB7PNkQYan3sAx-eO4_wa8x9BIRhF&jump_from=webapi&authKey=X/HJE1j5AIGgsOP4zT/8r1SsTD6ptqo4A9/PmbJeeWd3lBolMoNWpCuDHyzxrQTj)
+
 [![Bilibili](https://img.shields.io/badge/Bilibili-关注-FF69B4?logo=bilibili&logoColor=white)](https://space.bilibili.com/651467617)
 
 
@@ -188,9 +189,6 @@
 ### 🏭 业务系统
 
 - 📦 仓库管理
-- 🔥 精炼系统
-- 📧 邮件系统
-- 🔄 快捷兑换
 - 🎯 物品过滤
 
 ### 🧭 其他能力
@@ -241,7 +239,6 @@
 本项目使用 **GNU Lesser General Public License v3.0（LGPL-3.0）**
 
 - 📄 LICENSE：`LICENSE`
-- 📄 GPL 引用：`COPYING`
 
 🌐 官方地址：
 - https://www.gnu.org/licenses/lgpl-3.0.txt
@@ -249,8 +246,4 @@
 
 ---
 
-<<<<<<< HEAD
 ✨ *End of README*
-=======
-✨ *End of README*
->>>>>>> e43b874b53e0bc6ced6a462c57a0635e2d9dbdaa

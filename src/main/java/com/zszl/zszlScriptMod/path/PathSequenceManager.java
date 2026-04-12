@@ -899,16 +899,32 @@ public class PathSequenceManager {
                         String itemName = params.has("itemName") ? params.get("itemName").getAsString() : "";
                         String matchMode = params.has("matchMode") ? params.get("matchMode").getAsString() : "CONTAINS";
                         String useMode = params.has("useMode") ? params.get("useMode").getAsString() : "RIGHT_CLICK";
+                        boolean changeLocalSlot = params.has("changeLocalSlot")
+                                && params.get("changeLocalSlot").getAsBoolean();
                         int useCount = params.has("count") ? params.get("count").getAsInt() : 1;
                         int useInterval = params.has("intervalTicks") ? params.get("intervalTicks").getAsInt() : 0;
+                        int switchItemDelay = params.has("switchItemDelayTicks")
+                                ? Math.max(0, params.get("switchItemDelayTicks").getAsInt())
+                                : 0;
+                        int switchDelay = params.has("switchDelayTicks")
+                                ? Math.max(0, params.get("switchDelayTicks").getAsInt())
+                                : 0;
+                        int switchBackDelay = params.has("switchBackDelayTicks")
+                                ? Math.max(0, params.get("switchBackDelayTicks").getAsInt())
+                                : 0;
                         String matchText = "EXACT".equalsIgnoreCase(matchMode)
                                 ? I18n.format("gui.autouseitem.match.exact")
                                 : I18n.format("gui.autouseitem.match.contains");
                         String useText = "LEFT_CLICK".equalsIgnoreCase(useMode)
                                 ? I18n.format("gui.autouseitem.mode.left")
                                 : I18n.format("gui.autouseitem.mode.right");
+                        String localSlotText = changeLocalSlot
+                                ? I18n.format("path.common.on")
+                                : I18n.format("path.common.off");
                         return I18n.format("path.action.desc.use_hotbar_item", itemName, matchText, useText,
-                                Math.max(1, useCount), Math.max(0, useInterval));
+                                localSlotText, Math.max(1, useCount), Math.max(0, useInterval),
+                                formatTickDelayText(switchItemDelay), formatTickDelayText(switchDelay),
+                                formatTickDelayText(switchBackDelay));
                     case "move_inventory_item_to_hotbar":
                         String inventoryItemName = params.has("itemName") ? params.get("itemName").getAsString() : "";
                         String inventoryMatchMode = params.has("matchMode")
@@ -2127,6 +2143,14 @@ public class PathSequenceManager {
                             && "LEFT_CLICK".equalsIgnoreCase(params.get("useMode").getAsString())
                                     ? AutoUseItemRule.UseMode.LEFT_CLICK
                                     : AutoUseItemRule.UseMode.RIGHT_CLICK;
+                    final boolean hotbarChangeLocalSlot = params.has("changeLocalSlot")
+                            && params.get("changeLocalSlot").getAsBoolean();
+                    final int hotbarSwitchItemDelayTicks = Math.max(0,
+                            params.has("switchItemDelayTicks") ? params.get("switchItemDelayTicks").getAsInt() : 0);
+                    final int hotbarSwitchDelayTicks = Math.max(0,
+                            params.has("switchDelayTicks") ? params.get("switchDelayTicks").getAsInt() : 0);
+                    final int hotbarSwitchBackDelayTicks = Math.max(0,
+                            params.has("switchBackDelayTicks") ? params.get("switchBackDelayTicks").getAsInt() : 0);
                     final int hotbarUseCount = Math.max(1, params.has("count") ? params.get("count").getAsInt() : 1);
                     final int hotbarIntervalTicks = Math.max(0,
                             params.has("intervalTicks") ? params.get("intervalTicks").getAsInt() : 0);
@@ -2138,7 +2162,8 @@ public class PathSequenceManager {
                         if (hotbarIntervalTicks <= 0 || ModUtils.DelayScheduler.instance == null) {
                             for (int i = 0; i < hotbarUseCount; i++) {
                                 AutoUseItemHandler.INSTANCE.useMatchingHotbarItem(player, hotbarItemName,
-                                        hotbarMatchMode, hotbarUseMode);
+                                        hotbarMatchMode, hotbarUseMode, hotbarChangeLocalSlot,
+                                        hotbarSwitchItemDelayTicks, hotbarSwitchDelayTicks, hotbarSwitchBackDelayTicks);
                             }
                             return;
                         }
@@ -2146,7 +2171,10 @@ public class PathSequenceManager {
                         for (int i = 0; i < hotbarUseCount; i++) {
                             final int delay = i * hotbarIntervalTicks;
                             ModUtils.DelayScheduler.instance.schedule(() -> AutoUseItemHandler.INSTANCE
-                                    .useMatchingHotbarItem(player, hotbarItemName, hotbarMatchMode, hotbarUseMode),
+                                    .useMatchingHotbarItem(player, hotbarItemName, hotbarMatchMode, hotbarUseMode,
+                                            hotbarChangeLocalSlot,
+                                            hotbarSwitchItemDelayTicks, hotbarSwitchDelayTicks,
+                                            hotbarSwitchBackDelayTicks),
                                     delay);
                         }
                     };
