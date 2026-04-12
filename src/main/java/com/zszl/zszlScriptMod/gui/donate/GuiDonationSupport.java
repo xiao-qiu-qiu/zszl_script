@@ -1,0 +1,226 @@
+package com.zszl.zszlScriptMod.gui.donate;
+
+import com.zszl.zszlScriptMod.gui.GuiInventory;
+import com.zszl.zszlScriptMod.gui.components.GuiTheme;
+import com.zszl.zszlScriptMod.gui.components.ThemedButton;
+import com.zszl.zszlScriptMod.gui.components.ThemedGuiScreen;
+import com.zszl.zszlScriptMod.utils.DonationLeaderboardManager;
+import com.zszl.zszlScriptMod.zszlScriptMod;
+import net.minecraft.client.gui.GuiButton;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.renderer.GlStateManager;
+import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.client.resources.I18n;
+import net.minecraft.util.ResourceLocation;
+import org.lwjgl.input.Mouse;
+
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.InputStream;
+import java.io.IOException;
+import java.util.List;
+
+public class GuiDonationSupport extends ThemedGuiScreen {
+
+    private static final int BTN_BACK = 0;
+    private static final int BTN_REFRESH = 1;
+
+    private final GuiScreen parentScreen;
+
+    private int panelX, panelY, panelWidth, panelHeight;
+    private int leftX, leftY, leftW, leftH;
+    private int rightX, rightY, rightW, rightH;
+
+    private int scrollOffset = 0;
+    private int maxScroll = 0;
+
+    private ResourceLocation qrTexture;
+    private int qrTexW = 0;
+    private int qrTexH = 0;
+
+    public GuiDonationSupport(GuiScreen parentScreen) {
+        this.parentScreen = parentScreen;
+    }
+
+    private void returnToMainMenuOverlay() {
+        if (parentScreen != null) {
+            mc.displayGuiScreen(parentScreen);
+            return;
+        }
+        GuiInventory.openOverlayScreen();
+    }
+
+    @Override
+    public void initGui() {
+        this.buttonList.clear();
+
+        panelWidth = Math.min(680, this.width - 30);
+        panelHeight = Math.min(380, this.height - 24);
+        panelX = (this.width - panelWidth) / 2;
+        panelY = (this.height - panelHeight) / 2;
+
+        int contentY = panelY + 34;
+        int contentH = panelHeight - 72;
+        int gap = 12;
+
+        leftW = Math.max(220, (int) (panelWidth * 0.43f));
+        rightW = panelWidth - leftW - gap - 20;
+        leftX = panelX + 10;
+        rightX = leftX + leftW + gap;
+        leftY = contentY;
+        rightY = contentY;
+        leftH = contentH;
+        rightH = contentH;
+
+        this.buttonList
+                .add(new ThemedButton(BTN_BACK, panelX + panelWidth / 2 - 110, panelY + panelHeight - 28, 100, 20,
+                        I18n.format("gui.common.back")));
+        this.buttonList
+                .add(new ThemedButton(BTN_REFRESH, panelX + panelWidth / 2 + 10, panelY + panelHeight - 28, 100, 20,
+                        I18n.format("gui.donate.refresh")));
+
+        DonationLeaderboardManager.fetchContent();
+        loadQrTexture();
+    }
+
+    @Override
+    protected void actionPerformed(GuiButton button) throws IOException {
+        if (button.id == BTN_BACK) {
+            returnToMainMenuOverlay();
+            return;
+        }
+        if (button.id == BTN_REFRESH) {
+            DonationLeaderboardManager.forceRefresh();
+            loadQrTexture();
+        }
+    }
+
+    private void loadQrTexture() {
+        qrTexture = null;
+        qrTexW = 0;
+        qrTexH = 0;
+
+        try (InputStream is = DonationLeaderboardManager.class.getClassLoader()
+                .getResourceAsStream(DonationLeaderboardManager.PAYMENT_QR_RESOURCE)) {
+            if (is == null) {
+                zszlScriptMod.LOGGER.warn("[Donation] 未找到打赏码资源: {}", DonationLeaderboardManager.PAYMENT_QR_RESOURCE);
+                return;
+            }
+
+            BufferedImage image = ImageIO.read(is);
+            if (image == null) {
+                return;
+            }
+
+            qrTexW = image.getWidth();
+            qrTexH = image.getHeight();
+            DynamicTexture dynamicTexture = new DynamicTexture(image);
+            qrTexture = mc.getTextureManager().getDynamicTextureLocation("zszl_donation_qr", dynamicTexture);
+        } catch (Exception e) {
+            zszlScriptMod.LOGGER.warn("[Donation] 读取内置打赏码图片失败", e);
+        }
+    }
+
+    @Override
+    public void handleMouseInput() throws IOException {
+        super.handleMouseInput();
+        int dWheel = Mouse.getDWheel();
+        if (dWheel == 0) {
+            return;
+        }
+
+        int mouseX = Mouse.getX() * this.width / mc.displayWidth;
+        int mouseY = this.height - Mouse.getY() * this.height / mc.displayHeight - 1;
+        if (mouseX >= rightX && mouseX <= rightX + rightW && mouseY >= rightY && mouseY <= rightY + rightH) {
+            if (dWheel > 0) {
+                scrollOffset = Math.max(0, scrollOffset - 1);
+            } else {
+                scrollOffset = Math.min(maxScroll, scrollOffset + 1);
+            }
+        }
+    }
+
+    @Override
+    public void drawScreen(int mouseX, int mouseY, float partialTicks) {
+        this.drawDefaultBackground();
+
+        GuiTheme.drawPanel(panelX, panelY, panelWidth, panelHeight);
+        GuiTheme.drawTitleBar(panelX, panelY, panelWidth, I18n.format("gui.donate.title"), this.fontRenderer);
+
+        // 左侧：二维码与说明
+        drawRect(leftX, leftY, leftX + leftW, leftY + leftH, 0x66000000);
+        this.drawCenteredString(this.fontRenderer, I18n.format("gui.donate.qr_title"), leftX + leftW / 2, leftY + 6,
+                0xFFFFFF);
+
+        int qrBoxSize = Math.min(leftW - 20, 170);
+        int qrX = leftX + (leftW - qrBoxSize) / 2;
+        int qrY = leftY + 22;
+
+        drawRect(qrX - 1, qrY - 1, qrX + qrBoxSize + 1, qrY + qrBoxSize + 1, 0xFFB0B0B0);
+        drawRect(qrX, qrY, qrX + qrBoxSize, qrY + qrBoxSize, 0xFFFFFFFF);
+
+        if (qrTexture != null && qrTexW > 0 && qrTexH > 0) {
+            mc.getTextureManager().bindTexture(qrTexture);
+            GlStateManager.color(1F, 1F, 1F, 1F);
+            drawScaledCustomSizeModalRect(qrX, qrY, 0, 0, qrTexW, qrTexH, qrBoxSize, qrBoxSize, qrTexW, qrTexH);
+        } else {
+            this.drawCenteredString(this.fontRenderer, I18n.format("gui.donate.qr_placeholder"), leftX + leftW / 2,
+                    qrY + qrBoxSize / 2 - 4,
+                    0x666666);
+        }
+
+        int textY = qrY + qrBoxSize + 10;
+        this.drawString(this.fontRenderer, I18n.format("gui.donate.desc.free"), leftX + 8, textY, 0xFFFFFF);
+        this.drawString(this.fontRenderer, I18n.format("gui.donate.desc.support"), leftX + 8, textY + 14, 0xFFFFFF);
+        this.drawString(this.fontRenderer, I18n.format("gui.donate.desc.remark"), leftX + 8, textY + 28, 0xFFFFFF);
+        this.drawString(this.fontRenderer, I18n.format("gui.donate.desc.realtime"), leftX + 8, textY + 42, 0xFFFFFF);
+
+        // 右侧：打赏榜
+        drawRect(rightX, rightY, rightX + rightW, rightY + rightH, 0x66000000);
+        this.drawCenteredString(this.fontRenderer, I18n.format("gui.donate.rank_title"), rightX + rightW / 2,
+                rightY + 6, 0xFFFFFF);
+
+        int headerY = rightY + 24;
+        int rankColW = 42;
+        int amountColW = 68;
+        int nameColW = rightW - rankColW - amountColW - 10;
+
+        int rowStartX = rightX + 5;
+        drawRect(rowStartX, headerY - 2, rowStartX + rightW - 10, headerY + 12, 0x55334455);
+        this.drawString(this.fontRenderer, I18n.format("gui.donate.col.rank"), rowStartX + 4, headerY + 1, 0xFFFFFF);
+        this.drawString(this.fontRenderer, I18n.format("gui.donate.col.name"), rowStartX + rankColW + 4, headerY + 1,
+                0xFFFFFF);
+        this.drawString(this.fontRenderer, I18n.format("gui.donate.col.amount"), rowStartX + rankColW + nameColW + 4,
+                headerY + 1, 0xFFFFFF);
+
+        List<DonationLeaderboardManager.Entry> entries = DonationLeaderboardManager.leaderboard;
+        int listTop = headerY + 16;
+        int rowHeight = 14;
+        int visibleRows = Math.max(1, (rightH - 44) / rowHeight);
+        maxScroll = Math.max(0, entries.size() - visibleRows);
+        if (scrollOffset > maxScroll) {
+            scrollOffset = maxScroll;
+        }
+
+        if (entries.isEmpty()) {
+            this.drawCenteredString(this.fontRenderer, I18n.format("gui.donate.rank_loading"), rightX + rightW / 2,
+                    listTop + 30, 0xAAAAAA);
+        } else {
+            for (int i = 0; i < visibleRows; i++) {
+                int idx = i + scrollOffset;
+                if (idx >= entries.size()) {
+                    break;
+                }
+                DonationLeaderboardManager.Entry e = entries.get(idx);
+                int y = listTop + i * rowHeight;
+                if ((idx & 1) == 0) {
+                    drawRect(rowStartX, y - 1, rowStartX + rightW - 10, y + rowHeight - 1, 0x22111111);
+                }
+                this.drawString(this.fontRenderer, String.valueOf(e.rank), rowStartX + 8, y + 2, 0xFFFFFF);
+                this.drawString(this.fontRenderer, e.name, rowStartX + rankColW + 4, y + 2, 0xFFEFD280);
+                this.drawString(this.fontRenderer, e.amount, rowStartX + rankColW + nameColW + 4, y + 2, 0xFF98FB98);
+            }
+        }
+        super.drawScreen(mouseX, mouseY, partialTicks);
+    }
+}
