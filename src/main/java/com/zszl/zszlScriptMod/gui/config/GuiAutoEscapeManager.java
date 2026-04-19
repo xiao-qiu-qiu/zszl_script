@@ -22,7 +22,8 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
     private static final int BTN_TOGGLE_BLACKLIST = 1002;
     private static final int BTN_TOGGLE_RESTART = 1003;
     private static final int BTN_SELECT_RESTART_SEQUENCE = 1004;
-    private static final int BTN_TOGGLE_ENABLED = 1005;
+    private static final int BTN_TOGGLE_IGNORE_UNTIL_RESTART_COMPLETE = 1005;
+    private static final int BTN_TOGGLE_ENABLED = 1006;
     private static final int BTN_ENTITY_TYPE_BASE = 1100;
     private static final long CARD_DOUBLE_CLICK_WINDOW_MS = 300L;
 
@@ -57,6 +58,7 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
     private GuiButton btnToggleBlacklist;
     private GuiButton btnToggleRestart;
     private GuiButton btnSelectRestartSequence;
+    private GuiButton btnToggleIgnoreUntilRestartComplete;
     private GuiButton btnToggleEnabled;
     private final List<ToggleGuiButton> entityTypeButtons = new ArrayList<>();
     private final Set<String> editorEntityTypes = new LinkedHashSet<>();
@@ -65,6 +67,7 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
     private boolean editorWhitelistEnabled = false;
     private boolean editorBlacklistEnabled = false;
     private boolean editorRestartEnabled = false;
+    private boolean editorIgnoreTargetsUntilRestartComplete = false;
     private EditorStateSnapshot pendingRestoreState = null;
     private int lastClickedCardIndex = -1;
     private long lastClickedCardTimeMs = 0L;
@@ -214,6 +217,7 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         editorWhitelistEnabled = model.enableNameWhitelist;
         editorBlacklistEnabled = model.enableNameBlacklist;
         editorRestartEnabled = model.restartEnabled;
+        editorIgnoreTargetsUntilRestartComplete = model.ignoreTargetsUntilRestartComplete;
 
         clampEditorScroll();
         layoutAllWidgets();
@@ -237,6 +241,7 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         base.restartEnabled = editorRestartEnabled;
         base.restartDelaySeconds = parseInt(restartDelayField.getText(), base.restartDelaySeconds);
         base.restartSequenceName = safe(restartSequenceField.getText()).trim();
+        base.ignoreTargetsUntilRestartComplete = editorIgnoreTargetsUntilRestartComplete;
 
         base.enabled = editorEnabled;
         base.normalize();
@@ -264,6 +269,7 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         target.restartEnabled = source.restartEnabled;
         target.restartDelaySeconds = source.restartDelaySeconds;
         target.restartSequenceName = source.restartSequenceName;
+        target.ignoreTargetsUntilRestartComplete = source.ignoreTargetsUntilRestartComplete;
         target.normalize();
     }
 
@@ -288,6 +294,7 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         btnToggleBlacklist = createButton(BTN_TOGGLE_BLACKLIST, "");
         btnToggleRestart = createButton(BTN_TOGGLE_RESTART, "");
         btnSelectRestartSequence = createButton(BTN_SELECT_RESTART_SEQUENCE, "选择");
+        btnToggleIgnoreUntilRestartComplete = createButton(BTN_TOGGLE_IGNORE_UNTIL_RESTART_COMPLETE, "");
         btnToggleEnabled = createButton(BTN_TOGGLE_ENABLED, "");
 
         this.buttonList.add(btnSelectEscapeSequence);
@@ -295,6 +302,7 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         this.buttonList.add(btnToggleBlacklist);
         this.buttonList.add(btnToggleRestart);
         this.buttonList.add(btnSelectRestartSequence);
+        this.buttonList.add(btnToggleIgnoreUntilRestartComplete);
         this.buttonList.add(btnToggleEnabled);
 
         entityTypeButtons.clear();
@@ -350,6 +358,9 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         placeButton(btnSelectRestartSequence, getRestartSequenceRow(),
                 restartSequenceField.x + restartSequenceField.width + 6, 64, 20);
 
+        placeButton(btnToggleIgnoreUntilRestartComplete, getIgnoreTargetsUntilRestartCompleteRow(),
+                editorFieldX, fullFieldWidth, 20);
+
         placeButton(btnToggleEnabled, getEnabledRow(), editorFieldX, fullFieldWidth, 20);
     }
 
@@ -401,6 +412,9 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         }
         if (row == getRestartSequenceRow()) {
             return "后续序列";
+        }
+        if (row == getIgnoreTargetsUntilRestartCompleteRow()) {
+            return "重启前忽略目标";
         }
         if (row == getEnabledRow()) {
             return "启用";
@@ -492,6 +506,7 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
 
         String restartText = item.restartEnabled
                 ? "重启: " + Math.max(0, item.restartDelaySeconds) + "s -> " + safe(item.restartSequenceName)
+                        + (item.ignoreTargetsUntilRestartComplete ? " | 重启前忽略目标" : "")
                 : "重启: 关闭";
         drawString(fontRenderer,
                 trimToWidth("逃离: " + safe(item.escapeSequenceName) + " | " + restartText, width - 16),
@@ -513,6 +528,12 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         if (btnToggleRestart != null) {
             btnToggleRestart.displayString = "启用重启功能: " + yesNo(editorRestartEnabled);
             btnToggleRestart.enabled = btnToggleRestart.visible;
+        }
+        if (btnToggleIgnoreUntilRestartComplete != null) {
+            btnToggleIgnoreUntilRestartComplete.displayString = "执行完重启前忽略目标: "
+                    + yesNo(editorIgnoreTargetsUntilRestartComplete);
+            btnToggleIgnoreUntilRestartComplete.enabled = btnToggleIgnoreUntilRestartComplete.visible
+                    && editorRestartEnabled;
         }
         if (btnToggleEnabled != null) {
             btnToggleEnabled.displayString = "启用: " + boolText(editorEnabled);
@@ -599,6 +620,11 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
                 pendingRestoreState = snapshot;
                 mc.displayGuiScreen(this);
             }));
+            return true;
+        }
+        if (button.id == BTN_TOGGLE_IGNORE_UNTIL_RESTART_COMPLETE) {
+            editorIgnoreTargetsUntilRestartComplete = !editorIgnoreTargetsUntilRestartComplete;
+            layoutAllWidgets();
             return true;
         }
         if (button.id == BTN_TOGGLE_ENABLED) {
@@ -720,6 +746,9 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         }
         if (row == getRestartSequenceRow()) {
             return "后续序列：重启功能启用后要执行的新序列。选择后会保留当前滚动和编辑位置。";
+        }
+        if (row == getIgnoreTargetsUntilRestartCompleteRow()) {
+            return "重启前忽略目标：开启后，从逃离序列结束开始，一直到后续序列执行结束前，新的目标检测都不会再次打断并重触发自动逃离。";
         }
         if (row == getEnabledRow()) {
             return "启用：关闭后该规则不会参与检测。";
@@ -911,8 +940,12 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         return getRestartDelayRow() + 1;
     }
 
-    private int getEnabledRow() {
+    private int getIgnoreTargetsUntilRestartCompleteRow() {
         return getRestartSequenceRow() + 1;
+    }
+
+    private int getEnabledRow() {
+        return getIgnoreTargetsUntilRestartCompleteRow() + 1;
     }
 
     private EditorStateSnapshot captureEditorStateSnapshot() {
@@ -932,6 +965,7 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         snapshot.restartEnabled = editorRestartEnabled;
         snapshot.restartDelay = restartDelayField == null ? "" : safe(restartDelayField.getText());
         snapshot.restartSequenceName = restartSequenceField == null ? "" : safe(restartSequenceField.getText());
+        snapshot.ignoreTargetsUntilRestartComplete = editorIgnoreTargetsUntilRestartComplete;
         snapshot.enabled = editorEnabled;
         return snapshot;
     }
@@ -965,6 +999,7 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         editorWhitelistEnabled = snapshot.whitelistEnabled;
         editorBlacklistEnabled = snapshot.blacklistEnabled;
         editorRestartEnabled = snapshot.restartEnabled;
+        editorIgnoreTargetsUntilRestartComplete = snapshot.ignoreTargetsUntilRestartComplete;
         editorScrollOffset = snapshot.editorScrollOffset;
         clampEditorScroll();
         layoutAllWidgets();
@@ -986,6 +1021,7 @@ public class GuiAutoEscapeManager extends AbstractThreePaneRuleManager<AutoEscap
         private boolean restartEnabled = false;
         private String restartDelay = "";
         private String restartSequenceName = "";
+        private boolean ignoreTargetsUntilRestartComplete = false;
         private boolean enabled = true;
     }
 }

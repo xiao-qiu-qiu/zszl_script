@@ -2,6 +2,7 @@ package com.zszl.zszlScriptMod.gui.config;
 
 import com.zszl.zszlScriptMod.gui.components.GuiTheme;
 import com.zszl.zszlScriptMod.gui.components.ThemedButton;
+import com.zszl.zszlScriptMod.gui.path.GuiActionEditor.model.IndexedHitRegion;
 import com.zszl.zszlScriptMod.gui.path.GuiSequenceSelector;
 import com.zszl.zszlScriptMod.handlers.AutoPickupHandler;
 import com.zszl.zszlScriptMod.handlers.KillAuraHandler;
@@ -11,6 +12,7 @@ import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.resources.I18n;
+import net.minecraft.util.math.MathHelper;
 
 import java.io.IOException;
 import java.text.DecimalFormat;
@@ -57,6 +59,25 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
     private static final int DRAG_LIST_PICKUP_ACTION = 3;
     private static final int LIST_AUTO_SCROLL_MARGIN = 12;
     private static final int LIST_HINT_LINE_HEIGHT = 10;
+    private static final int INVENTORY_GRID_ROWS = AutoPickupRule.INVENTORY_SLOT_ROWS;
+    private static final int INVENTORY_GRID_COLS = AutoPickupRule.INVENTORY_SLOT_COLUMNS;
+    private static final int INVENTORY_SLOT_COUNT = AutoPickupRule.INVENTORY_SLOT_COUNT;
+    private static final int ROW_INVENTORY_DETECTION_TITLE = 10;
+    private static final int ROW_INVENTORY_DETECTION_GRID = 11;
+    private static final int ROW_WHITELIST_TOGGLE = 15;
+    private static final int ROW_WHITELIST_ACTIONS = 16;
+    private static final int ROW_WHITELIST_SCROLL = 17;
+    private static final int ROW_WHITELIST_BOX = 18;
+    private static final int ROW_BLACKLIST_TOGGLE = 22;
+    private static final int ROW_BLACKLIST_ACTIONS = 23;
+    private static final int ROW_BLACKLIST_SCROLL = 24;
+    private static final int ROW_BLACKLIST_BOX = 25;
+    private static final int ROW_PICKUP_ACTION_ACTIONS = 29;
+    private static final int ROW_PICKUP_ACTION_SCROLL = 30;
+    private static final int ROW_PICKUP_ACTION_BOX = 31;
+    private static final int ROW_POST_PICKUP_SEQUENCE = 35;
+    private static final int ROW_POST_PICKUP_DELAY = 36;
+    private static final int ROW_STOP_ON_EXIT = 37;
 
     private GuiTextField nameField;
     private GuiTextField categoryField;
@@ -105,12 +126,19 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
     private final List<AutoPickupRule.ItemMatchEntry> editorWhitelistEntries = new ArrayList<>();
     private final List<AutoPickupRule.ItemMatchEntry> editorBlacklistEntries = new ArrayList<>();
     private final List<AutoPickupRule.PickupActionEntry> editorPickupActionEntries = new ArrayList<>();
+    private final LinkedHashSet<Integer> editorInventoryDetectionSlots = new LinkedHashSet<>();
+    private final LinkedHashSet<Integer> inventoryDetectionDragSelectionSnapshot = new LinkedHashSet<>();
+    private final List<IndexedHitRegion> inventoryDetectionSlotRegions = new ArrayList<>();
     private int selectedWhitelistEntryIndex = -1;
     private int selectedBlacklistEntryIndex = -1;
     private int selectedPickupActionEntryIndex = -1;
     private int whitelistScrollOffset = 0;
     private int blacklistScrollOffset = 0;
     private int pickupActionScrollOffset = 0;
+    private boolean inventoryDetectionGridDragging = false;
+    private boolean inventoryDetectionDragAddMode = true;
+    private int inventoryDetectionDragAnchorIndex = -1;
+    private int inventoryDetectionDragCurrentIndex = -1;
     private EditorStateSnapshot pendingRestoreState = null;
     private int lastCardClickIndex = -1;
     private long lastCardClickAtMs = 0L;
@@ -232,6 +260,7 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         copy.itemWhitelistEntries = copyEntryList(source.itemWhitelistEntries, source.itemWhitelist);
         copy.itemBlacklistEntries = copyEntryList(source.itemBlacklistEntries, source.itemBlacklist);
         copy.pickupActionEntries = copyPickupActionEntryList(source.pickupActionEntries);
+        copy.inventoryDetectionSlots = copyInventoryDetectionSlots(source.inventoryDetectionSlots);
         syncLegacyKeywordLists(copy);
         copy.postPickupSequence = source.postPickupSequence;
         copy.postPickupDelaySeconds = source.postPickupDelaySeconds;
@@ -305,12 +334,15 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         editorBlacklistEntries.addAll(copyEntryList(rule.itemBlacklistEntries, rule.itemBlacklist));
         editorPickupActionEntries.clear();
         editorPickupActionEntries.addAll(copyPickupActionEntryList(rule.pickupActionEntries));
+        editorInventoryDetectionSlots.clear();
+        editorInventoryDetectionSlots.addAll(copyInventoryDetectionSlots(rule.inventoryDetectionSlots));
         selectedWhitelistEntryIndex = editorWhitelistEntries.isEmpty() ? -1 : 0;
         selectedBlacklistEntryIndex = editorBlacklistEntries.isEmpty() ? -1 : 0;
         selectedPickupActionEntryIndex = editorPickupActionEntries.isEmpty() ? -1 : 0;
         whitelistScrollOffset = 0;
         blacklistScrollOffset = 0;
         pickupActionScrollOffset = 0;
+        clearInventoryDetectionDragState();
         clearEntryDragState();
 
         layoutAllWidgets();
@@ -335,6 +367,7 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         base.itemWhitelistEntries = normalizeEntryList(editorWhitelistEntries);
         base.itemBlacklistEntries = normalizeEntryList(editorBlacklistEntries);
         base.pickupActionEntries = normalizePickupActionEntryList(editorPickupActionEntries);
+        base.inventoryDetectionSlots = copyInventoryDetectionSlots(editorInventoryDetectionSlots);
         syncLegacyKeywordLists(base);
         base.postPickupSequence = safe(editorSequence).trim();
         base.postPickupDelaySeconds = Math.max(0, parseInt(delayField.getText(), base.postPickupDelaySeconds));
@@ -366,6 +399,7 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         target.itemWhitelistEntries = copyEntryList(source.itemWhitelistEntries, source.itemWhitelist);
         target.itemBlacklistEntries = copyEntryList(source.itemBlacklistEntries, source.itemBlacklist);
         target.pickupActionEntries = copyPickupActionEntryList(source.pickupActionEntries);
+        target.inventoryDetectionSlots = copyInventoryDetectionSlots(source.inventoryDetectionSlots);
         syncLegacyKeywordLists(target);
         target.postPickupSequence = source.postPickupSequence;
         target.postPickupDelaySeconds = source.postPickupDelaySeconds;
@@ -469,28 +503,37 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         placeField(antiStuckTimeoutField, 9, editorFieldX, halfWidth);
         placeButton(btnSelectAntiStuckSequence, 9, editorFieldX + halfWidth + 10, halfWidth, 20);
 
-        placeButton(btnToggleItemWhitelist, 10, editorFieldX, fullFieldWidth, 20);
-        placeButton(btnAddWhitelistEntry, 11, editorFieldX, actionButtonWidth, 20);
-        placeButton(btnEditWhitelistEntry, 11, editorFieldX + actionButtonWidth + 4, actionButtonWidth, 20);
-        placeButton(btnDeleteWhitelistEntry, 11, editorFieldX + 2 * (actionButtonWidth + 4), actionButtonWidth, 20);
-        placeButton(btnWhitelistScrollUp, 12, editorFieldX, smallButtonWidth, 20);
-        placeButton(btnWhitelistScrollDown, 12, editorFieldX + smallButtonWidth + 4, smallButtonWidth, 20);
+        placeButton(btnToggleItemWhitelist, ROW_WHITELIST_TOGGLE, editorFieldX, fullFieldWidth, 20);
+        placeButton(btnAddWhitelistEntry, ROW_WHITELIST_ACTIONS, editorFieldX, actionButtonWidth, 20);
+        placeButton(btnEditWhitelistEntry, ROW_WHITELIST_ACTIONS, editorFieldX + actionButtonWidth + 4,
+                actionButtonWidth, 20);
+        placeButton(btnDeleteWhitelistEntry, ROW_WHITELIST_ACTIONS,
+                editorFieldX + 2 * (actionButtonWidth + 4), actionButtonWidth, 20);
+        placeButton(btnWhitelistScrollUp, ROW_WHITELIST_SCROLL, editorFieldX, smallButtonWidth, 20);
+        placeButton(btnWhitelistScrollDown, ROW_WHITELIST_SCROLL, editorFieldX + smallButtonWidth + 4,
+                smallButtonWidth, 20);
 
-        placeButton(btnToggleItemBlacklist, 17, editorFieldX, fullFieldWidth, 20);
-        placeButton(btnAddBlacklistEntry, 18, editorFieldX, actionButtonWidth, 20);
-        placeButton(btnEditBlacklistEntry, 18, editorFieldX + actionButtonWidth + 4, actionButtonWidth, 20);
-        placeButton(btnDeleteBlacklistEntry, 18, editorFieldX + 2 * (actionButtonWidth + 4), actionButtonWidth, 20);
-        placeButton(btnBlacklistScrollUp, 19, editorFieldX, smallButtonWidth, 20);
-        placeButton(btnBlacklistScrollDown, 19, editorFieldX + smallButtonWidth + 4, smallButtonWidth, 20);
+        placeButton(btnToggleItemBlacklist, ROW_BLACKLIST_TOGGLE, editorFieldX, fullFieldWidth, 20);
+        placeButton(btnAddBlacklistEntry, ROW_BLACKLIST_ACTIONS, editorFieldX, actionButtonWidth, 20);
+        placeButton(btnEditBlacklistEntry, ROW_BLACKLIST_ACTIONS, editorFieldX + actionButtonWidth + 4,
+                actionButtonWidth, 20);
+        placeButton(btnDeleteBlacklistEntry, ROW_BLACKLIST_ACTIONS,
+                editorFieldX + 2 * (actionButtonWidth + 4), actionButtonWidth, 20);
+        placeButton(btnBlacklistScrollUp, ROW_BLACKLIST_SCROLL, editorFieldX, smallButtonWidth, 20);
+        placeButton(btnBlacklistScrollDown, ROW_BLACKLIST_SCROLL, editorFieldX + smallButtonWidth + 4,
+                smallButtonWidth, 20);
 
-        placeButton(btnAddPickupActionEntry, 24, editorFieldX, actionButtonWidth, 20);
-        placeButton(btnEditPickupActionEntry, 24, editorFieldX + actionButtonWidth + 4, actionButtonWidth, 20);
-        placeButton(btnDeletePickupActionEntry, 24, editorFieldX + 2 * (actionButtonWidth + 4), actionButtonWidth, 20);
-        placeButton(btnPickupActionScrollUp, 25, editorFieldX, smallButtonWidth, 20);
-        placeButton(btnPickupActionScrollDown, 25, editorFieldX + smallButtonWidth + 4, smallButtonWidth, 20);
-        placeButton(btnSelectSequence, 30, editorFieldX, fullFieldWidth, 20);
-        placeField(delayField, 31, editorFieldX, halfWidth);
-        placeButton(btnToggleStopOnExit, 32, editorFieldX, fullFieldWidth, 20);
+        placeButton(btnAddPickupActionEntry, ROW_PICKUP_ACTION_ACTIONS, editorFieldX, actionButtonWidth, 20);
+        placeButton(btnEditPickupActionEntry, ROW_PICKUP_ACTION_ACTIONS, editorFieldX + actionButtonWidth + 4,
+                actionButtonWidth, 20);
+        placeButton(btnDeletePickupActionEntry, ROW_PICKUP_ACTION_ACTIONS,
+                editorFieldX + 2 * (actionButtonWidth + 4), actionButtonWidth, 20);
+        placeButton(btnPickupActionScrollUp, ROW_PICKUP_ACTION_SCROLL, editorFieldX, smallButtonWidth, 20);
+        placeButton(btnPickupActionScrollDown, ROW_PICKUP_ACTION_SCROLL, editorFieldX + smallButtonWidth + 4,
+                smallButtonWidth, 20);
+        placeButton(btnSelectSequence, ROW_POST_PICKUP_SEQUENCE, editorFieldX, fullFieldWidth, 20);
+        placeField(delayField, ROW_POST_PICKUP_DELAY, editorFieldX, halfWidth);
+        placeButton(btnToggleStopOnExit, ROW_STOP_ON_EXIT, editorFieldX, fullFieldWidth, 20);
     }
 
     @Override
@@ -530,42 +573,49 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
                 return "防卡重启";
             case 9:
                 return "卡住停留秒数 / 重启序列";
-            case 10:
-                return "启用掉落物白名单";
+            case ROW_INVENTORY_DETECTION_TITLE:
+                return "背包检测范围";
             case 11:
-                return "白名单卡片操作";
             case 12:
-                return "白名单滚动";
             case 13:
             case 14:
-            case 15:
-            case 16:
                 return "";
-            case 17:
-                return "启用掉落物黑名单";
+            case ROW_WHITELIST_TOGGLE:
+                return "启用掉落物白名单";
+            case ROW_WHITELIST_ACTIONS:
+                return "白名单卡片操作";
+            case ROW_WHITELIST_SCROLL:
+                return "白名单滚动";
             case 18:
-                return "黑名单卡片操作";
             case 19:
-                return "黑名单滚动";
             case 20:
             case 21:
-            case 22:
-            case 23:
                 return "";
-            case 24:
-                return "触发条件卡片操作";
+            case ROW_BLACKLIST_TOGGLE:
+                return "启用掉落物黑名单";
+            case ROW_BLACKLIST_ACTIONS:
+                return "黑名单卡片操作";
+            case ROW_BLACKLIST_SCROLL:
+                return "黑名单滚动";
             case 25:
-                return "触发条件卡片滚动";
             case 26:
             case 27:
             case 28:
-            case 29:
                 return "";
-            case 30:
-                return "全部拾取后序列";
+            case ROW_PICKUP_ACTION_ACTIONS:
+                return "触发条件卡片操作";
+            case ROW_PICKUP_ACTION_SCROLL:
+                return "触发条件卡片滚动";
             case 31:
-                return I18n.format("gui.autopickup.delay");
             case 32:
+            case 33:
+            case 34:
+                return "";
+            case ROW_POST_PICKUP_SEQUENCE:
+                return "全部拾取后序列";
+            case ROW_POST_PICKUP_DELAY:
+                return I18n.format("gui.autopickup.delay");
+            case ROW_STOP_ON_EXIT:
                 return "离开区域停止后续";
             default:
                 return "";
@@ -605,7 +655,9 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
     protected void drawEditorContents(int mouseX, int mouseY, float partialTicks) {
         drawEditorTabs(mouseX, mouseY);
         drawEditorFields();
-        if (activeEditorSection == 1) {
+        if (activeEditorSection == 0) {
+            drawInventoryDetectionSection(mouseX, mouseY);
+        } else if (activeEditorSection == 1) {
             drawEntryListBox(mouseX, mouseY, true);
         } else if (activeEditorSection == 2) {
             drawEntryListBox(mouseX, mouseY, false);
@@ -646,8 +698,10 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
                 ? I18n.format("gui.common.none")
                 : item.postPickupSequence;
         int pickupActionCount = copyPickupActionEntryList(item.pickupActionEntries).size();
+        String inventoryDetectionSummary = formatInventoryDetectionSummary(item.inventoryDetectionSlots);
         drawString(fontRenderer,
-                trimToWidth("白名单: " + (item.enableItemWhitelist ? "开" : "关") + "(" + whitelist.size() + ")  黑名单: "
+                trimToWidth("检测槽位: " + inventoryDetectionSummary + "  白名单: "
+                                + (item.enableItemWhitelist ? "开" : "关") + "(" + whitelist.size() + ")  黑名单: "
                                 + (item.enableItemBlacklist ? "开" : "关") + "(" + blacklist.size() + ")",
                         width - 12),
                 x + 6, y + 44, 0xFFB8C7D9);
@@ -701,6 +755,11 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
                 && !isBlank(item.antiStuckRestartSequence)
                 && !PathSequenceManager.hasSequence(item.antiStuckRestartSequence)) {
             return "防卡重启序列不存在: " + item.antiStuckRestartSequence;
+        }
+        for (Integer slot : item.inventoryDetectionSlots == null ? new ArrayList<Integer>() : item.inventoryDetectionSlots) {
+            if (slot == null || slot.intValue() < 0 || slot.intValue() >= INVENTORY_SLOT_COUNT) {
+                return "背包检测槽位超出范围: " + slot;
+            }
         }
         for (AutoPickupRule.PickupActionEntry entry : normalizePickupActionEntryList(item.pickupActionEntries)) {
             if (entry == null) {
@@ -1060,6 +1119,9 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         if (mouseButton != 0) {
             return;
         }
+        if (activeEditorSection == 0 && handleInventoryDetectionSlotClick(mouseX, mouseY)) {
+            return;
+        }
         int whitelistIndex = getEntryIndexAt(mouseX, mouseY, true);
         if (whitelistIndex >= 0) {
             selectedWhitelistEntryIndex = whitelistIndex;
@@ -1089,7 +1151,13 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
     @Override
     protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
         super.mouseClickMove(mouseX, mouseY, clickedMouseButton, timeSinceLastClick);
-        if (clickedMouseButton != 0 || draggingListType == DRAG_LIST_NONE) {
+        if (clickedMouseButton != 0) {
+            return;
+        }
+        if (inventoryDetectionGridDragging) {
+            updateInventoryDetectionGridDrag(mouseX, mouseY);
+        }
+        if (draggingListType == DRAG_LIST_NONE) {
             return;
         }
         draggingMouseX = mouseX;
@@ -1101,6 +1169,7 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
     protected void mouseReleased(int mouseX, int mouseY, int state) {
         super.mouseReleased(mouseX, mouseY, state);
         if (state == 0) {
+            endInventoryDetectionGridDrag();
             clearEntryDragState();
         }
     }
@@ -1120,9 +1189,171 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         return false;
     }
 
+    private void drawInventoryDetectionSection(int mouseX, int mouseY) {
+        inventoryDetectionSlotRegions.clear();
+        pruneInventoryDetectionSlots();
+
+        int infoY = getEditorRowY(ROW_INVENTORY_DETECTION_TITLE);
+        if (infoY >= 0) {
+            String info = editorInventoryDetectionSlots.isEmpty()
+                    ? "§7未选时默认检查整个背包"
+                    : "§7已指定 " + editorInventoryDetectionSlots.size() + " 个检测槽位";
+            drawString(fontRenderer, info, editorFieldX, infoY + 4, 0xFFB8C7D9);
+        }
+
+        drawInventoryDetectionGrid(mouseX, mouseY, getEditorRowY(ROW_INVENTORY_DETECTION_GRID));
+    }
+
+    private void drawInventoryDetectionGrid(int mouseX, int mouseY, int baseY) {
+        if (baseY < 0) {
+            return;
+        }
+
+        int gap = 2;
+        int cellSize = getInventoryDetectionGridCellSize();
+        int gridWidth = INVENTORY_GRID_COLS * cellSize + Math.max(0, INVENTORY_GRID_COLS - 1) * gap;
+        int gridX = editorFieldX + Math.max(0, (getEditorContentWidth() - gridWidth) / 2);
+
+        for (int row = 0; row < INVENTORY_GRID_ROWS; row++) {
+            for (int col = 0; col < INVENTORY_GRID_COLS; col++) {
+                int slotIndex = row * INVENTORY_GRID_COLS + col;
+                int cellX = gridX + col * (cellSize + gap);
+                int cellY = baseY + row * (cellSize + gap);
+                inventoryDetectionSlotRegions.add(new IndexedHitRegion(cellX, cellY, cellSize, cellSize, slotIndex));
+
+                boolean selected = editorInventoryDetectionSlots.contains(slotIndex);
+                boolean hovered = mouseX >= cellX && mouseX <= cellX + cellSize
+                        && mouseY >= cellY && mouseY <= cellY + cellSize;
+                int bg = selected ? (hovered ? 0xFF4B8BB2 : 0xFF2F6F95) : (hovered ? 0xFF31465C : 0xFF1B2D3D);
+                int border = selected ? 0xFF9FDFFF : 0xFF3F6A8C;
+
+                drawRect(cellX, cellY, cellX + cellSize, cellY + cellSize, bg);
+                drawHorizontalLine(cellX, cellX + cellSize, cellY, border);
+                drawHorizontalLine(cellX, cellX + cellSize, cellY + cellSize, border);
+                drawVerticalLine(cellX, cellY, cellY + cellSize, border);
+                drawVerticalLine(cellX + cellSize, cellY, cellY + cellSize, border);
+
+                String label = String.valueOf(slotIndex);
+                int textX = cellX + (cellSize - fontRenderer.getStringWidth(label)) / 2;
+                int textY = cellY + Math.max(3, (cellSize - 8) / 2);
+                drawString(fontRenderer, label, textX, textY, 0xFFEAF7FF);
+            }
+        }
+    }
+
+    private boolean handleInventoryDetectionSlotClick(int mouseX, int mouseY) {
+        for (IndexedHitRegion region : inventoryDetectionSlotRegions) {
+            if (region.contains(mouseX, mouseY)) {
+                beginInventoryDetectionGridDrag(region);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void beginInventoryDetectionGridDrag(IndexedHitRegion region) {
+        if (region == null) {
+            return;
+        }
+        pruneInventoryDetectionSlots();
+        inventoryDetectionGridDragging = true;
+        inventoryDetectionDragAnchorIndex = region.index;
+        inventoryDetectionDragCurrentIndex = region.index;
+        inventoryDetectionDragSelectionSnapshot.clear();
+        inventoryDetectionDragSelectionSnapshot.addAll(editorInventoryDetectionSlots);
+        inventoryDetectionDragAddMode = !editorInventoryDetectionSlots.contains(region.index);
+        applyInventoryDetectionDragSelection();
+    }
+
+    private void updateInventoryDetectionGridDrag(int mouseX, int mouseY) {
+        if (!inventoryDetectionGridDragging) {
+            return;
+        }
+        IndexedHitRegion region = findInventoryDetectionGridRegion(mouseX, mouseY);
+        if (region == null || region.index == inventoryDetectionDragCurrentIndex) {
+            return;
+        }
+        inventoryDetectionDragCurrentIndex = region.index;
+        applyInventoryDetectionDragSelection();
+    }
+
+    private IndexedHitRegion findInventoryDetectionGridRegion(int mouseX, int mouseY) {
+        for (IndexedHitRegion region : inventoryDetectionSlotRegions) {
+            if (region.contains(mouseX, mouseY)) {
+                return region;
+            }
+        }
+        return null;
+    }
+
+    private void applyInventoryDetectionDragSelection() {
+        editorInventoryDetectionSlots.clear();
+        editorInventoryDetectionSlots.addAll(inventoryDetectionDragSelectionSnapshot);
+
+        int maxSlots = INVENTORY_SLOT_COUNT;
+        int cols = INVENTORY_GRID_COLS;
+        if (maxSlots <= 0 || cols <= 0) {
+            return;
+        }
+
+        int anchor = MathHelper.clamp(inventoryDetectionDragAnchorIndex, 0, maxSlots - 1);
+        int current = MathHelper.clamp(inventoryDetectionDragCurrentIndex, 0, maxSlots - 1);
+        int startRow = Math.min(anchor / cols, current / cols);
+        int endRow = Math.max(anchor / cols, current / cols);
+        int startCol = Math.min(anchor % cols, current % cols);
+        int endCol = Math.max(anchor % cols, current % cols);
+
+        for (int row = startRow; row <= endRow; row++) {
+            for (int col = startCol; col <= endCol; col++) {
+                int slotIndex = row * cols + col;
+                if (slotIndex < 0 || slotIndex >= maxSlots) {
+                    continue;
+                }
+                if (inventoryDetectionDragAddMode) {
+                    editorInventoryDetectionSlots.add(slotIndex);
+                } else {
+                    editorInventoryDetectionSlots.remove(slotIndex);
+                }
+            }
+        }
+    }
+
+    private void endInventoryDetectionGridDrag() {
+        if (!inventoryDetectionGridDragging) {
+            return;
+        }
+        clearInventoryDetectionDragState();
+        pruneInventoryDetectionSlots();
+    }
+
+    private void clearInventoryDetectionDragState() {
+        inventoryDetectionGridDragging = false;
+        inventoryDetectionDragAddMode = true;
+        inventoryDetectionDragAnchorIndex = -1;
+        inventoryDetectionDragCurrentIndex = -1;
+        inventoryDetectionDragSelectionSnapshot.clear();
+    }
+
+    private void pruneInventoryDetectionSlots() {
+        List<Integer> normalized = copyInventoryDetectionSlots(editorInventoryDetectionSlots);
+        editorInventoryDetectionSlots.clear();
+        editorInventoryDetectionSlots.addAll(normalized);
+    }
+
+    private int getEditorContentWidth() {
+        return Math.max(120, editorX + editorWidth - 14 - editorFieldX);
+    }
+
+    private int getInventoryDetectionGridCellSize() {
+        int availableWidth = getEditorContentWidth();
+        int gap = 2;
+        return Math.max(14, Math.min(22,
+                (availableWidth - Math.max(0, INVENTORY_GRID_COLS - 1) * gap) / Math.max(1, INVENTORY_GRID_COLS)));
+    }
+
     private void drawEntryListBox(int mouseX, int mouseY, boolean whitelist) {
         int boxX = editorFieldX;
-        int boxY = getEditorRowY(whitelist ? 13 : 20);
+        int boxY = getEditorRowY(whitelist ? ROW_WHITELIST_BOX : ROW_BLACKLIST_BOX);
         if (boxY < 0) {
             return;
         }
@@ -1181,7 +1412,7 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
 
     private int getEntryIndexAt(int mouseX, int mouseY, boolean whitelist) {
         int boxX = editorFieldX;
-        int boxY = getEditorRowY(whitelist ? 13 : 20);
+        int boxY = getEditorRowY(whitelist ? ROW_WHITELIST_BOX : ROW_BLACKLIST_BOX);
         if (boxY < 0) {
             return -1;
         }
@@ -1207,7 +1438,7 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
 
     private void drawPickupActionEntryListBox(int mouseX, int mouseY) {
         int boxX = editorFieldX;
-        int boxY = getEditorRowY(26);
+        int boxY = getEditorRowY(ROW_PICKUP_ACTION_BOX);
         if (boxY < 0) {
             return;
         }
@@ -1266,7 +1497,7 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
 
     private int getPickupActionEntryIndexAt(int mouseX, int mouseY) {
         int boxX = editorFieldX;
-        int boxY = getEditorRowY(26);
+        int boxY = getEditorRowY(ROW_PICKUP_ACTION_BOX);
         if (boxY < 0) {
             return -1;
         }
@@ -1289,11 +1520,11 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
     }
 
     private boolean isMouseInEntryListBox(int mouseX, int mouseY, boolean whitelist) {
-        return isMouseInListBox(mouseX, mouseY, getEditorRowY(whitelist ? 13 : 20));
+        return isMouseInListBox(mouseX, mouseY, getEditorRowY(whitelist ? ROW_WHITELIST_BOX : ROW_BLACKLIST_BOX));
     }
 
     private boolean isMouseInPickupActionEntryListBox(int mouseX, int mouseY) {
-        return isMouseInListBox(mouseX, mouseY, getEditorRowY(26));
+        return isMouseInListBox(mouseX, mouseY, getEditorRowY(ROW_PICKUP_ACTION_BOX));
     }
 
     private boolean isMouseInListBox(int mouseX, int mouseY, int boxY) {
@@ -1418,11 +1649,11 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
     private int getListBoxYForType(int listType) {
         switch (listType) {
             case DRAG_LIST_WHITELIST:
-                return getEditorRowY(13);
+                return getEditorRowY(ROW_WHITELIST_BOX);
             case DRAG_LIST_BLACKLIST:
-                return getEditorRowY(20);
+                return getEditorRowY(ROW_BLACKLIST_BOX);
             case DRAG_LIST_PICKUP_ACTION:
-                return getEditorRowY(26);
+                return getEditorRowY(ROW_PICKUP_ACTION_BOX);
             default:
                 return -1;
         }
@@ -1696,6 +1927,22 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         return copyPickupActionEntryList(source);
     }
 
+    private List<Integer> copyInventoryDetectionSlots(Iterable<Integer> source) {
+        LinkedHashSet<Integer> normalized = new LinkedHashSet<>();
+        if (source != null) {
+            for (Integer slot : source) {
+                if (slot == null) {
+                    continue;
+                }
+                int slotIndex = slot.intValue();
+                if (slotIndex >= 0 && slotIndex < INVENTORY_SLOT_COUNT) {
+                    normalized.add(slotIndex);
+                }
+            }
+        }
+        return new ArrayList<>(normalized);
+    }
+
     private AutoPickupRule.ItemMatchEntry normalizeEntry(AutoPickupRule.ItemMatchEntry source) {
         if (source == null) {
             return null;
@@ -1725,6 +1972,7 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         entry.keyword = keyword;
         entry.requiredNbtTags = requiredNbtTags;
         entry.sequenceName = sequenceName;
+        entry.executeDelaySeconds = Math.max(0, source.executeDelaySeconds);
         return entry;
     }
 
@@ -1791,6 +2039,11 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
                 ? (" (" + Math.max(0, entry.executeDelaySeconds) + "s)")
                 : "";
         return condition + " -> " + (sequenceName.isEmpty() ? "未选序列" : sequenceName) + delayText;
+    }
+
+    private String formatInventoryDetectionSummary(Iterable<Integer> slots) {
+        int count = copyInventoryDetectionSlots(slots).size();
+        return count <= 0 ? "全背包" : (count + "格");
     }
 
     private int getWhitelistMaxScroll() {
@@ -1866,6 +2119,7 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         snapshot.whitelistEntries = copyEntryList(editorWhitelistEntries, null);
         snapshot.blacklistEntries = copyEntryList(editorBlacklistEntries, null);
         snapshot.pickupActionEntries = copyPickupActionEntryList(editorPickupActionEntries);
+        snapshot.inventoryDetectionSlots = copyInventoryDetectionSlots(editorInventoryDetectionSlots);
         snapshot.selectedWhitelistEntryIndex = selectedWhitelistEntryIndex;
         snapshot.selectedBlacklistEntryIndex = selectedBlacklistEntryIndex;
         snapshot.selectedPickupActionEntryIndex = selectedPickupActionEntryIndex;
@@ -1914,6 +2168,8 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         editorBlacklistEntries.addAll(copyEntryList(snapshot.blacklistEntries, null));
         editorPickupActionEntries.clear();
         editorPickupActionEntries.addAll(copyPickupActionEntryList(snapshot.pickupActionEntries));
+        editorInventoryDetectionSlots.clear();
+        editorInventoryDetectionSlots.addAll(copyInventoryDetectionSlots(snapshot.inventoryDetectionSlots));
         selectedWhitelistEntryIndex = editorWhitelistEntries.isEmpty()
                 ? -1
                 : Math.max(0, Math.min(snapshot.selectedWhitelistEntryIndex, editorWhitelistEntries.size() - 1));
@@ -1929,6 +2185,7 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
                 Math.min(snapshot.pickupActionScrollOffset, getPickupActionMaxScroll()));
         activeEditorSection = Math.max(0, Math.min(snapshot.activeEditorSection, editorSections.length - 1));
         editorScrollOffset = snapshot.editorScrollOffset;
+        clearInventoryDetectionDragState();
         clearEntryDragState();
         clampEditorScroll();
         layoutAllWidgets();
@@ -1946,20 +2203,20 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         switch (activeEditorSection) {
             case 0:
                 startRow = 0;
-                endRow = 9;
+                endRow = 14;
                 break;
             case 1:
-                startRow = 10;
-                endRow = 16;
+                startRow = 15;
+                endRow = 21;
                 break;
             case 2:
-                startRow = 17;
-                endRow = 23;
+                startRow = 22;
+                endRow = 28;
                 break;
             case 3:
             default:
-                startRow = 24;
-                endRow = 32;
+                startRow = 29;
+                endRow = 37;
                 break;
         }
         for (int row = startRow; row <= endRow; row++) {
@@ -2086,6 +2343,7 @@ public class GuiAutoPickupConfig extends AbstractThreePaneRuleManager<AutoPickup
         private List<AutoPickupRule.ItemMatchEntry> whitelistEntries = new ArrayList<>();
         private List<AutoPickupRule.ItemMatchEntry> blacklistEntries = new ArrayList<>();
         private List<AutoPickupRule.PickupActionEntry> pickupActionEntries = new ArrayList<>();
+        private List<Integer> inventoryDetectionSlots = new ArrayList<>();
         private int selectedWhitelistEntryIndex = -1;
         private int selectedBlacklistEntryIndex = -1;
         private int selectedPickupActionEntryIndex = -1;

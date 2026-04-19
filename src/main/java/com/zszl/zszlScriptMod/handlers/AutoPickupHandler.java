@@ -557,18 +557,22 @@ public class AutoPickupHandler {
                 && (mc.player.getDistanceSq(currentTargetItem) < getPickupReachedDistanceSq(activeRule));
 
         if (targetGone) {
-            ItemStack pickedStack = currentTargetStackSnapshot == null ? ItemStack.EMPTY : currentTargetStackSnapshot.copy();
+            ItemStack pickedStack = currentTargetStackSnapshot == null ? ItemStack.EMPTY
+                    : currentTargetStackSnapshot.copy();
+            boolean waitForInventoryValidation = hasRestrictedInventoryDetectionSlots(activeRule);
             if (ModConfig.isDebugFlagEnabled(DebugModule.AUTO_PICKUP)) {
                 mc.player.sendMessage(new TextComponentString("§d[调试] §7目标已拾取/消失，重新搜索..."));
             }
             hasPickedUpAtLeastOneItem = true;
-            suppressInventoryValidationForStack(pickedStack, nowTick + 4);
+            if (!waitForInventoryValidation) {
+                suppressInventoryValidationForStack(pickedStack, nowTick + 4);
+            }
             currentTargetItem = null;
             currentTargetStackSnapshot = ItemStack.EMPTY;
             lastGotoTargetEntityId = Integer.MIN_VALUE;
             lastGotoTick = -99999;
             clearPendingNavigationAttempt();
-            if (tryTriggerPickupActionSequence(pickedStack)) {
+            if (!waitForInventoryValidation && tryTriggerPickupActionSequence(pickedStack)) {
                 return;
             }
             currentState = State.SEARCHING;
@@ -645,7 +649,7 @@ public class AutoPickupHandler {
         if (player == null) {
             return;
         }
-        replaceLastInventorySnapshot(captureInventoryCounts(player));
+        replaceLastInventorySnapshot(captureInventoryCounts(player, activeRule));
     }
 
     private void syncInventoryPickupValidation(int nowTick) {
@@ -653,7 +657,7 @@ public class AutoPickupHandler {
             return;
         }
         pruneSuppressedInventoryValidation(nowTick);
-        Map<String, InventoryCountEntry> currentCounts = captureInventoryCounts(mc.player);
+        Map<String, InventoryCountEntry> currentCounts = captureInventoryCounts(mc.player, activeRule);
         if (!hasInventoryCountChanged(currentCounts)) {
             return;
         }
@@ -698,13 +702,17 @@ public class AutoPickupHandler {
         tryTriggerPickupActionSequence(stack.copy());
     }
 
-    private Map<String, InventoryCountEntry> captureInventoryCounts(EntityPlayerSP player) {
+    private Map<String, InventoryCountEntry> captureInventoryCounts(EntityPlayerSP player, AutoPickupRule rule) {
         Map<String, InventoryCountEntry> counts = new HashMap<>();
         if (player == null || player.inventory == null || player.inventory.mainInventory == null) {
             return counts;
         }
         List<ItemStack> mainInventory = player.inventory.mainInventory;
-        for (ItemStack stack : mainInventory) {
+        for (int rawSlotIndex = 0; rawSlotIndex < mainInventory.size(); rawSlotIndex++) {
+            if (!isInventoryDetectionSlotIncluded(rule, rawSlotIndex)) {
+                continue;
+            }
+            ItemStack stack = mainInventory.get(rawSlotIndex);
             if (stack == null || stack.isEmpty()) {
                 continue;
             }
@@ -1210,6 +1218,7 @@ public class AutoPickupHandler {
         rule.itemWhitelistEntries = normalizeRuleEntryList(rule.itemWhitelistEntries, rule.itemWhitelist);
         rule.itemBlacklistEntries = normalizeRuleEntryList(rule.itemBlacklistEntries, rule.itemBlacklist);
         rule.pickupActionEntries = normalizePickupActionEntryList(rule.pickupActionEntries);
+        rule.inventoryDetectionSlots = normalizeInventoryDetectionSlots(rule.inventoryDetectionSlots);
         rule.itemWhitelist = flattenEntryKeywords(rule.itemWhitelistEntries);
         rule.itemBlacklist = flattenEntryKeywords(rule.itemBlacklistEntries);
         if (rule.postPickupSequence == null) {
@@ -1220,6 +1229,44 @@ public class AutoPickupHandler {
         }
         rule.postPickupDelaySeconds = Math.max(0, rule.postPickupDelaySeconds);
         rule.antiStuckTimeoutSeconds = Math.max(1, rule.antiStuckTimeoutSeconds);
+    }
+
+    private static List<Integer> normalizeInventoryDetectionSlots(List<Integer> source) {
+        LinkedHashSet<Integer> normalized = new LinkedHashSet<>();
+        if (source != null) {
+            for (Integer slot : source) {
+                if (slot == null) {
+                    continue;
+                }
+                int slotIndex = slot.intValue();
+                if (slotIndex >= 0 && slotIndex < AutoPickupRule.INVENTORY_SLOT_COUNT) {
+                    normalized.add(slotIndex);
+                }
+            }
+        }
+        return new ArrayList<>(normalized);
+    }
+
+    private boolean hasRestrictedInventoryDetectionSlots(AutoPickupRule rule) {
+        return rule != null && rule.inventoryDetectionSlots != null && !rule.inventoryDetectionSlots.isEmpty();
+    }
+
+    private boolean isInventoryDetectionSlotIncluded(AutoPickupRule rule, int rawSlotIndex) {
+        if (!hasRestrictedInventoryDetectionSlots(rule)) {
+            return true;
+        }
+        int visibleSlotIndex = toVisibleInventorySlotIndex(rawSlotIndex);
+        return visibleSlotIndex >= 0 && rule.inventoryDetectionSlots.contains(visibleSlotIndex);
+    }
+
+    private int toVisibleInventorySlotIndex(int rawSlotIndex) {
+        if (rawSlotIndex < 0 || rawSlotIndex >= AutoPickupRule.INVENTORY_SLOT_COUNT) {
+            return -1;
+        }
+        if (rawSlotIndex < 9) {
+            return 27 + rawSlotIndex;
+        }
+        return rawSlotIndex - 9;
     }
 
     private double getPickupReachedDistanceSq(AutoPickupRule rule) {
