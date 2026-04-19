@@ -31,13 +31,7 @@ final class InventoryItemFilterExpressionEditorSupport {
         if (!expressions.isEmpty()) {
             return expressions;
         }
-        String legacy = buildLegacyCompatibleExpression(editor.currentParams);
-        if (legacy.isEmpty()) {
-            return new ArrayList<String>();
-        }
-        List<String> converted = new ArrayList<String>();
-        converted.add(legacy);
-        return converted;
+        return buildLegacyCompatibleExpressions(editor);
     }
 
     static void applyExpressionListToCurrentParams(GuiActionEditor editor, List<String> expressions) {
@@ -45,7 +39,7 @@ final class InventoryItemFilterExpressionEditorSupport {
             editor.currentParams = new JsonObject();
         }
         InventoryItemFilterExpressionEngine.writeExpressions(editor.currentParams, expressions);
-        clearLegacyFields(editor.currentParams);
+        clearLegacyFields(editor.currentParams, editor.isMoveChestActionSelected());
         clampSelectionAndScroll(editor, getExpressionList(editor).size());
     }
 
@@ -77,7 +71,8 @@ final class InventoryItemFilterExpressionEditorSupport {
     }
 
     static void updateControlLayout(GuiActionEditor editor) {
-        if (!editor.isConditionInventoryActionSelected() || editor.inventoryItemFilterExpressionToolbarBaseY < 0) {
+        if (!editor.isInventoryItemFilterExpressionActionSelected()
+                || editor.inventoryItemFilterExpressionToolbarBaseY < 0) {
             return;
         }
         int x = editor.getParamContentX();
@@ -119,7 +114,8 @@ final class InventoryItemFilterExpressionEditorSupport {
     }
 
     static int getCustomBottomBaseY(GuiActionEditor editor) {
-        if (!editor.isConditionInventoryActionSelected() || editor.inventoryItemFilterExpressionCardListBaseY < 0) {
+        if (!editor.isInventoryItemFilterExpressionActionSelected()
+                || editor.inventoryItemFilterExpressionCardListBaseY < 0) {
             return 0;
         }
         return editor.inventoryItemFilterExpressionCardListBaseY + GuiActionEditor.BOOLEAN_EXPRESSION_CARD_LIST_HEIGHT + 8;
@@ -127,7 +123,8 @@ final class InventoryItemFilterExpressionEditorSupport {
 
     static void drawCustomSection(GuiActionEditor editor, int mouseX, int mouseY) {
         editor.inventoryItemFilterExpressionCardRegions.clear();
-        if (!editor.isConditionInventoryActionSelected() || editor.inventoryItemFilterExpressionCardListBaseY < 0) {
+        if (!editor.isInventoryItemFilterExpressionActionSelected()
+                || editor.inventoryItemFilterExpressionCardListBaseY < 0) {
             return;
         }
 
@@ -269,7 +266,8 @@ final class InventoryItemFilterExpressionEditorSupport {
     }
 
     static boolean handleCustomClick(GuiActionEditor editor, int mouseX, int mouseY) {
-        if (!editor.isConditionInventoryActionSelected() || editor.inventoryItemFilterExpressionCardListBaseY < 0) {
+        if (!editor.isInventoryItemFilterExpressionActionSelected()
+                || editor.inventoryItemFilterExpressionCardListBaseY < 0) {
             return false;
         }
         int x = editor.getParamContentX();
@@ -292,7 +290,7 @@ final class InventoryItemFilterExpressionEditorSupport {
 
     static boolean handleCustomWheel(GuiActionEditor editor, int mouseX, int mouseY, int dWheel) {
         List<String> expressions = getExpressionList(editor);
-        if (!editor.isConditionInventoryActionSelected() || expressions.isEmpty() || dWheel == 0) {
+        if (!editor.isInventoryItemFilterExpressionActionSelected() || expressions.isEmpty() || dWheel == 0) {
             return false;
         }
         int x = editor.getParamContentX();
@@ -316,7 +314,7 @@ final class InventoryItemFilterExpressionEditorSupport {
         return true;
     }
 
-    private static void clearLegacyFields(JsonObject target) {
+    private static void clearLegacyFields(JsonObject target, boolean moveChestAction) {
         if (target == null) {
             return;
         }
@@ -325,18 +323,46 @@ final class InventoryItemFilterExpressionEditorSupport {
         target.remove("requiredNbtTags");
         target.remove("requiredNbtTagsText");
         target.remove("requiredNbtTagsMode");
+        if (moveChestAction) {
+            target.remove("moveChestRules");
+        }
     }
 
-    private static String buildLegacyCompatibleExpression(JsonObject params) {
+    private static List<String> buildLegacyCompatibleExpressions(GuiActionEditor editor) {
+        List<String> converted = new ArrayList<String>();
+        JsonObject params = editor.currentParams;
         if (params == null) {
-            return "";
+            return converted;
         }
+
+        if (editor.isMoveChestActionSelected()) {
+            String requiredNbtTagMatchMode = ItemFilterHandler.readRequiredNbtTagMatchMode(params);
+            for (ItemFilterHandler.MoveChestFilterRule rule : ItemFilterHandler.readMoveChestFilterRules(params)) {
+                if (rule == null || rule.isEmpty()) {
+                    continue;
+                }
+                String expression = InventoryItemFilterExpressionEngine.buildLegacyCompatibleExpression(
+                        rule.getItemName(),
+                        "CONTAINS",
+                        rule.getRequiredNbtTags(),
+                        requiredNbtTagMatchMode);
+                if (!expression.isEmpty()) {
+                    converted.add(expression);
+                }
+            }
+            return converted;
+        }
+
         String itemName = params.has("itemName") ? params.get("itemName").getAsString() : "";
         String matchMode = params.has("matchMode") ? params.get("matchMode").getAsString() : "CONTAINS";
         List<String> requiredNbtTags = ItemFilterHandler.readTagFilters(params, "requiredNbtTags", "requiredNbtTagsText");
         String requiredNbtTagMatchMode = ItemFilterHandler.readRequiredNbtTagMatchMode(params);
-        return InventoryItemFilterExpressionEngine.buildLegacyCompatibleExpression(itemName, matchMode, requiredNbtTags,
-                requiredNbtTagMatchMode);
+        String expression = InventoryItemFilterExpressionEngine.buildLegacyCompatibleExpression(itemName, matchMode,
+                requiredNbtTags, requiredNbtTagMatchMode);
+        if (!expression.isEmpty()) {
+            converted.add(expression);
+        }
+        return converted;
     }
 
     private static int getToolbarHeight(int width) {

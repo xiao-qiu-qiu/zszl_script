@@ -9,6 +9,7 @@ import com.google.gson.reflect.TypeToken;
 import com.zszl.zszlScriptMod.zszlScriptMod;
 import com.zszl.zszlScriptMod.config.DebugModule;
 import com.zszl.zszlScriptMod.config.ModConfig;
+import com.zszl.zszlScriptMod.path.InventoryItemFilterExpressionEngine;
 import com.zszl.zszlScriptMod.system.ProfileManager;
 import com.zszl.zszlScriptMod.utils.ModUtils;
 
@@ -566,13 +567,14 @@ public class ItemFilterHandler {
         List<Integer> selectedContainerSlots = readSlotList(params, "chestSlots", "chestSlotsText", containerSlotCount);
         List<Integer> selectedInventorySlots = readSlotList(params, "inventorySlots", "inventorySlotsText",
                 playerInventoryVisibleSlots);
+        List<String> itemFilterExpressions = InventoryItemFilterExpressionEngine.readExpressions(params);
         List<MoveChestFilterRule> filterRules = readMoveChestFilterRules(params);
         String requiredNbtTagMatchMode = readRequiredNbtTagMatchMode(params);
         String moveDirection = readMoveChestDirection(params);
 
-        if (filterRules.isEmpty()) {
+        if (itemFilterExpressions.isEmpty() && filterRules.isEmpty()) {
             if (ModConfig.isDebugFlagEnabled(DebugModule.ITEM_FILTER)) {
-                player.sendMessage(new TextComponentString("§d[调试] §e至少需要添加一条有效的物品转移规则，槽位转移取消。"));
+                player.sendMessage(new TextComponentString("§d[调试] §e至少需要添加一条有效的物品过滤表达式或兼容旧版规则，槽位转移取消。"));
             }
             return;
         }
@@ -603,6 +605,7 @@ public class ItemFilterHandler {
                 selectedSourceSlots,
                 targetSlotIndices,
                 selectedTargetSlots,
+                itemFilterExpressions,
                 filterRules,
                 requiredNbtTagMatchMode);
         if (clickPlan.isEmpty()) {
@@ -683,6 +686,7 @@ public class ItemFilterHandler {
             List<Integer> selectedSourceSlots,
             List<Integer> targetSlotIndices,
             List<Integer> selectedTargetSlots,
+            List<String> itemFilterExpressions,
             List<MoveChestFilterRule> filterRules,
             String requiredNbtTagMatchMode) {
         if (container == null) {
@@ -710,7 +714,8 @@ public class ItemFilterHandler {
             if (sourceStack == null || sourceStack.isEmpty()) {
                 continue;
             }
-            if (!matchesAnyMoveChestRule(sourceStack, filterRules, requiredNbtTagMatchMode)) {
+            if (!matchesAnyMoveChestRule(sourceStack, sourceIndex, itemFilterExpressions, filterRules,
+                    requiredNbtTagMatchMode)) {
                 continue;
             }
 
@@ -826,8 +831,25 @@ public class ItemFilterHandler {
         return normalizeMoveChestItemName(stack.getDisplayName()).contains(expected);
     }
 
-    private static boolean matchesAnyMoveChestRule(ItemStack stack, List<MoveChestFilterRule> rules,
+    private static boolean matchesAnyMoveChestRule(ItemStack stack, int sourceSlotIndex,
+            List<String> expressions,
+            List<MoveChestFilterRule> rules,
             String requiredNbtTagMatchMode) {
+        if (expressions != null && !expressions.isEmpty()) {
+            for (String expression : expressions) {
+                if (expression == null || expression.trim().isEmpty()) {
+                    continue;
+                }
+                try {
+                    if (InventoryItemFilterExpressionEngine.matches(stack, sourceSlotIndex, expression)) {
+                        return true;
+                    }
+                } catch (Exception e) {
+                    zszlScriptMod.LOGGER.warn("[move_chest] 物品过滤表达式解析失败: {}", expression, e);
+                }
+            }
+            return false;
+        }
         if (rules == null || rules.isEmpty()) {
             return false;
         }

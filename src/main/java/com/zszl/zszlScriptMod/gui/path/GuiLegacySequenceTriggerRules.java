@@ -2,6 +2,7 @@ package com.zszl.zszlScriptMod.gui.path;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.zszl.zszlScriptMod.gui.components.GuiTextInput;
 import com.zszl.zszlScriptMod.gui.components.GuiTheme;
 import com.zszl.zszlScriptMod.gui.components.ThemedButton;
 import com.zszl.zszlScriptMod.gui.components.ThemedGuiScreen;
@@ -47,9 +48,11 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
     private static final int BTN_IMPORT_PACKET = 26;
     private static final int BTN_IDLE_EXCLUDE_PATH = 27;
     private static final int BTN_IDLE_IGNORE_DAMAGE = 28;
+    private static final String CATEGORY_ALL = "__all__";
 
     private static final int RULE_CARD_H = 36;
     private static final int RULE_CARD_GAP = 4;
+    private static final int RULE_TREE_ROW_H = 20;
     private static final int LIB_ROW_H = 28;
     private static final int TAB_BAR_H = 22;
     private static final int TAB_BAR_GAP = 4;
@@ -92,10 +95,73 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
         }
     }
 
+    private static final class RuleTreeRow {
+        private static final int TYPE_ALL = -1;
+        private static final int TYPE_GROUP = 0;
+        private static final int TYPE_RULE = 1;
+
+        private final int type;
+        private final String category;
+        private final String label;
+        private final int ruleIndex;
+        private final int indent;
+
+        private RuleTreeRow(int type, String category, String label, int ruleIndex, int indent) {
+            this.type = type;
+            this.category = category == null ? "" : category;
+            this.label = label == null ? "" : label;
+            this.ruleIndex = ruleIndex;
+            this.indent = indent;
+        }
+
+        private static RuleTreeRow all(String label) {
+            return new RuleTreeRow(TYPE_ALL, CATEGORY_ALL, label, -1, 0);
+        }
+
+        private static RuleTreeRow group(String category, String label) {
+            return new RuleTreeRow(TYPE_GROUP, category, label, -1, 0);
+        }
+
+        private static RuleTreeRow rule(String category, String label, int ruleIndex) {
+            return new RuleTreeRow(TYPE_RULE, category, label, ruleIndex, 1);
+        }
+    }
+
+    private static final class RuleTreeDropTarget {
+        private final String category;
+        private final int targetRuleIndex;
+        private final boolean after;
+        private final int lineY;
+        private final boolean categoryDrop;
+
+        private RuleTreeDropTarget(String category, int targetRuleIndex, boolean after, int lineY,
+                boolean categoryDrop) {
+            this.category = category == null ? "" : category;
+            this.targetRuleIndex = targetRuleIndex;
+            this.after = after;
+            this.lineY = lineY;
+            this.categoryDrop = categoryDrop;
+        }
+    }
+
+    private static final class TreeContextMenuItem {
+        private final String key;
+        private final String label;
+        private final boolean enabled;
+
+        private TreeContextMenuItem(String key, String label, boolean enabled) {
+            this.key = key;
+            this.label = label;
+            this.enabled = enabled;
+        }
+    }
+
     private static final List<LegacyTriggerEventItem> EVENT_LIBRARY = LegacyTriggerEventLibrary.createDefaultItems();
 
     private final GuiScreen parent;
     private final List<LegacySequenceTriggerManager.RuleEditModel> rules = new ArrayList<>();
+    private final List<String> categories = new ArrayList<>();
+    private final List<RuleTreeRow> visibleRuleTreeRows = new ArrayList<>();
 
     private int selectedRuleIndex = -1;
     private int listScroll = 0;
@@ -128,6 +194,7 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
     private int activeEditorTab = TAB_BASE;
 
     private GuiTextField nameField;
+    private GuiTextField categoryField;
     private GuiTextField sequenceField;
     private GuiTextField cooldownField;
     private GuiTextField containsField;
@@ -173,7 +240,22 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
     private boolean workingCopyInitialized = false;
     private final List<TooltipRegion> tooltipRegions = new ArrayList<>();
     private final Set<String> collapsedLibraryGroups = new LinkedHashSet<>();
+    private final Set<String> collapsedRuleGroups = new LinkedHashSet<>();
     private final List<LegacyTriggerEventItem> visibleLibraryRows = new ArrayList<>();
+    private final List<TreeContextMenuItem> treeContextMenuItems = new ArrayList<>();
+    private int pendingRuleTreePressIndex = -1;
+    private int pendingRuleTreePressMouseX = 0;
+    private int pendingRuleTreePressMouseY = 0;
+    private boolean ruleTreeDragging = false;
+    private int draggingRuleIndex = -1;
+    private int sourceCategoryDragIndex = -1;
+    private RuleTreeDropTarget currentRuleTreeDropTarget = null;
+    private boolean treeContextMenuVisible = false;
+    private int treeContextMenuX = 0;
+    private int treeContextMenuY = 0;
+    private String treeContextTargetCategory = "";
+    private int treeContextMenuWidth = 164;
+    private int treeContextMenuItemHeight = 18;
 
     public GuiLegacySequenceTriggerRules(GuiScreen parent) {
         this.parent = parent;
@@ -183,6 +265,7 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
     public void initGui() {
         Keyboard.enableRepeatEvents(true);
         this.buttonList.clear();
+        resetRuleTreeDragState();
         if (!workingCopyInitialized) {
             reloadWorkingCopy();
             workingCopyInitialized = true;
@@ -232,16 +315,17 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
 
     private void initFields() {
         nameField = createField(3001);
-        sequenceField = createField(3002);
-        cooldownField = createField(3003);
-        containsField = createField(3004);
-        noteField = createField(3005);
-        librarySearchField = createField(3006);
-        eventTextField = createField(3007);
-        keyNameField = createField(3008);
+        categoryField = createField(3002);
+        sequenceField = createField(3003);
+        cooldownField = createField(3004);
+        containsField = createField(3005);
+        noteField = createField(3006);
+        librarySearchField = createField(3007);
+        eventTextField = createField(3008);
+        keyNameField = createField(3009);
         idleDurationMsField = createField(3016);
-        damageSourceField = createField(3009);
-        damageMinField = createField(3010);
+        damageSourceField = createField(3010);
+        damageMinField = createField(3011);
         guiTitleField = createField(3101);
         guiClassField = createField(3102);
         chatTextField = createField(3103);
@@ -298,6 +382,9 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
     private void reloadWorkingCopy() {
         rules.clear();
         rules.addAll(LegacySequenceTriggerManager.getRuleModels());
+        categories.clear();
+        categories.addAll(LegacySequenceTriggerManager.getCategoriesSnapshot());
+        ensureLocalCategoriesSynced();
         if (rules.isEmpty()) {
             selectedRuleIndex = -1;
         } else {
@@ -308,6 +395,7 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
     private void loadFromRule(LegacySequenceTriggerManager.RuleEditModel rule) {
         JsonObject params = copyJson(rule.params);
         nameField.setText(safe(rule.name));
+        categoryField.setText(normalizeCategory(rule.category));
         sequenceField.setText(safe(rule.sequenceName));
         cooldownField.setText(String.valueOf(Math.max(0, rule.cooldownMs)));
         containsField.setText(safe(rule.contains));
@@ -343,6 +431,7 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
         for (GuiTextField field : allFields()) {
             field.setText("");
         }
+        categoryField.setText(getSelectedCategoryForNewRule());
         cooldownField.setText("1000");
         idleDurationMsField.setText("1000");
         timerIntervalField.setText("1");
@@ -359,7 +448,7 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
     }
 
     private List<GuiTextField> allFields() {
-        return Arrays.asList(nameField, sequenceField, cooldownField, containsField, noteField, guiTitleField,
+        return Arrays.asList(nameField, categoryField, sequenceField, cooldownField, containsField, noteField, guiTitleField,
                 guiClassField, chatTextField, packetTextField, packetChannelField, eventTextField, keyNameField,
                 idleDurationMsField, damageSourceField, damageMinField, timerIntervalField, hpThresholdField,
                 areaFromField, areaToField, inventoryTextField, inventoryFullSlotsField, itemPickupTextField,
@@ -398,6 +487,7 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
         }
         LegacySequenceTriggerManager.RuleEditModel rule = rules.get(selectedRuleIndex);
         rule.name = safe(nameField.getText()).trim();
+        rule.category = normalizeCategory(categoryField.getText());
         rule.sequenceName = safe(sequenceField.getText()).trim();
         rule.contains = safe(containsField.getText()).trim();
         rule.note = safe(noteField.getText()).trim();
@@ -454,6 +544,7 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
             putTrimmed(params, "entityText", entityTextField.getText());
         }
         rule.params = params;
+        ensureLocalCategoryExists(rule.category);
     }
 
     @Override
@@ -463,7 +554,9 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
             flushEditorToSelected();
             LegacySequenceTriggerManager.RuleEditModel created = new LegacySequenceTriggerManager.RuleEditModel();
             created.name = "trigger_rule_" + (rules.size() + 1);
+            created.category = getSelectedCategoryForNewRule();
             rules.add(created);
+            ensureLocalCategoryExists(created.category);
             selectedRuleIndex = rules.size() - 1;
             recalcLayout();
             loadFromRule(created);
@@ -504,7 +597,8 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
                 statusMessage = "§c保存失败: " + validationError;
                 break;
             }
-            LegacySequenceTriggerManager.saveRuleModels(rules);
+            ensureLocalCategoriesSynced();
+            LegacySequenceTriggerManager.saveRuleModels(rules, categories);
             statusMessage = "§a触发器规则已保存";
             break;
         case BTN_BACK:
@@ -579,7 +673,7 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
         tooltipRegions.clear();
         GuiTheme.drawPanel(panelX, panelY, panelW, panelH);
         GuiTheme.drawTitleBar(panelX, panelY, panelW, "路径序列触发器规则", this.fontRenderer);
-        drawPane(listCollapsed ? "规则" : "规则列表", listX, listY, listW, listH);
+        drawPane(listCollapsed ? "规则" : "规则树", listX, listY, listW, listH);
         drawPane(libraryCollapsed ? "事件" : "事件库", libraryX, libraryY, libraryW, libraryH);
         drawPane("事件编辑器", editorX, editorY, editorW, editorH);
         drawCollapseButton(listX, listY, listW, listCollapsed);
@@ -589,6 +683,7 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
         drawEditor(mouseX, mouseY);
         drawString(fontRenderer, statusMessage, panelX + 12, panelY + panelH - 38, 0xFFB8C7D9);
         super.drawScreen(mouseX, mouseY, partialTicks);
+        drawTreeContextMenu(mouseX, mouseY);
         drawHoverTooltips(mouseX, mouseY);
     }
 
@@ -596,36 +691,117 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
         if (listCollapsed) {
             return;
         }
-        int visible = Math.max(1, (listH - 30) / (RULE_CARD_H + RULE_CARD_GAP));
-        maxListScroll = Math.max(0, rules.size() - visible);
+        rebuildVisibleRuleTreeRows();
+        int visible = getVisibleRuleTreeRowCount();
+        maxListScroll = Math.max(0, visibleRuleTreeRows.size() - visible);
         listScroll = Math.max(0, Math.min(listScroll, maxListScroll));
         int rowY = listY + 24;
         for (int i = 0; i < visible; i++) {
             int idx = listScroll + i;
-            if (idx >= rules.size()) {
+            if (idx >= visibleRuleTreeRows.size()) {
                 break;
             }
-            LegacySequenceTriggerManager.RuleEditModel rule = rules.get(idx);
-            boolean hovered = isHoverRegion(mouseX, mouseY, listX + 6, rowY, listW - 14, RULE_CARD_H);
-            GuiTheme.UiState state = idx == selectedRuleIndex ? GuiTheme.UiState.SELECTED
+            RuleTreeRow row = visibleRuleTreeRows.get(idx);
+            boolean hovered = isHoverRegion(mouseX, mouseY, listX + 6, rowY, listW - 14, RULE_TREE_ROW_H - 2);
+            boolean selected = row.type == RuleTreeRow.TYPE_RULE && row.ruleIndex == selectedRuleIndex;
+            GuiTheme.UiState state = selected ? GuiTheme.UiState.SELECTED
                     : (hovered ? GuiTheme.UiState.HOVER : GuiTheme.UiState.NORMAL);
-            GuiTheme.drawButtonFrameSafe(listX + 6, rowY, listW - 14, RULE_CARD_H, state);
-            drawString(fontRenderer, trim((rule.enabled ? "§a✔ " : "§c✘ ") + displayRuleName(rule), listW - 28),
-                    listX + 12, rowY + 6, 0xFFFFFFFF);
-            drawString(fontRenderer,
-                    trim("§7" + displayTriggerType(rule.triggerType) + " | " + safe(rule.sequenceName), listW - 28),
-                    listX + 12, rowY + 20, 0xFF9FB0C4);
-            rowY += RULE_CARD_H + RULE_CARD_GAP;
+            GuiTheme.drawButtonFrameSafe(listX + 6, rowY, listW - 14, RULE_TREE_ROW_H - 2, state);
+
+            int textX = listX + 12 + row.indent * 12;
+            int maxTextWidth = Math.max(32, listW - (textX - listX) - 20);
+            if (row.type == RuleTreeRow.TYPE_GROUP) {
+                String arrow = collapsedRuleGroups.contains(row.category) ? "▶" : "▼";
+                drawString(fontRenderer, arrow, textX, rowY + 5, 0xFF9FDFFF);
+                drawString(fontRenderer, trim(row.label, Math.max(20, maxTextWidth - 12)), textX + 10, rowY + 5,
+                        0xFFE8F1FA);
+            } else if (row.type == RuleTreeRow.TYPE_ALL) {
+                drawString(fontRenderer, trim(row.label, maxTextWidth), textX, rowY + 5, 0xFFE8F1FA);
+            } else {
+                LegacySequenceTriggerManager.RuleEditModel rule = row.ruleIndex >= 0 && row.ruleIndex < rules.size()
+                        ? rules.get(row.ruleIndex)
+                        : null;
+                String prefix = rule != null && rule.enabled ? "§a✔ " : "§c✘ ";
+                String sequence = rule == null ? "" : safe(rule.sequenceName).trim();
+                String line = prefix + displayRuleName(rule)
+                        + (sequence.isEmpty() ? "" : " §7| " + trim(sequence, Math.max(10, maxTextWidth / 2)));
+                drawString(fontRenderer, trim(line, maxTextWidth), textX, rowY + 5, 0xFFFFFFFF);
+            }
+            rowY += RULE_TREE_ROW_H;
         }
 
-        if (rules.size() > visible) {
+        if (ruleTreeDragging && currentRuleTreeDropTarget != null) {
+            drawRuleTreeDropIndicator(currentRuleTreeDropTarget);
+        }
+
+        if (visibleRuleTreeRows.size() > visible) {
             int barY = listY + 24;
             int barH = Math.max(20, listH - 30);
-            int thumbH = Math.max(18, (int) ((visible / (float) Math.max(visible, rules.size())) * barH));
+            int thumbH = Math.max(18,
+                    (int) ((visible / (float) Math.max(visible, visibleRuleTreeRows.size())) * barH));
             int track = Math.max(1, barH - thumbH);
             int thumbY = barY + (int) ((listScroll / (float) Math.max(1, maxListScroll)) * track);
             GuiTheme.drawScrollbar(listX + listW - 8, barY, 4, barH, thumbY, thumbH);
         }
+    }
+
+    private void rebuildVisibleRuleTreeRows() {
+        visibleRuleTreeRows.clear();
+        ensureLocalCategoriesSynced();
+        for (String category : categories) {
+            List<Integer> groupRuleIndices = collectRuleIndicesForCategory(category);
+            String groupLabel = category + " §7(" + groupRuleIndices.size() + ")";
+            visibleRuleTreeRows.add(RuleTreeRow.group(category, groupLabel));
+            if (collapsedRuleGroups.contains(category)) {
+                continue;
+            }
+            for (Integer ruleIndex : groupRuleIndices) {
+                LegacySequenceTriggerManager.RuleEditModel rule = ruleIndex != null && ruleIndex >= 0
+                        && ruleIndex < rules.size()
+                                ? rules.get(ruleIndex)
+                                : null;
+                visibleRuleTreeRows.add(RuleTreeRow.rule(category, displayRuleName(rule), ruleIndex == null ? -1 : ruleIndex));
+            }
+        }
+    }
+
+    private List<Integer> collectRuleIndicesForCategory(String category) {
+        List<Integer> indices = new ArrayList<>();
+        for (int i = 0; i < rules.size(); i++) {
+            if (normalizeCategory(rules.get(i).category).equalsIgnoreCase(normalizeCategory(category))) {
+                indices.add(i);
+            }
+        }
+        return indices;
+    }
+
+    private int getVisibleRuleTreeRowCount() {
+        return Math.max(1, (listH - 30) / RULE_TREE_ROW_H);
+    }
+
+    private int getRuleTreeRowTop(int actualIndex) {
+        return listY + 24 + (actualIndex - listScroll) * RULE_TREE_ROW_H;
+    }
+
+    private int getRuleTreeRowIndexAt(int mouseY) {
+        if (listCollapsed) {
+            return -1;
+        }
+        int row = (mouseY - (listY + 24)) / RULE_TREE_ROW_H;
+        if (row < 0) {
+            return -1;
+        }
+        int actualIndex = listScroll + row;
+        return actualIndex >= 0 && actualIndex < visibleRuleTreeRows.size() ? actualIndex : -1;
+    }
+
+    private void drawRuleTreeDropIndicator(RuleTreeDropTarget target) {
+        if (target == null || target.lineY <= 0) {
+            return;
+        }
+        drawRect(listX + 8, target.lineY - 1, listX + listW - 12, target.lineY + 1, 0xFF7FD4FF);
+        drawRect(listX + 8, target.lineY - 3, listX + 12, target.lineY + 3, 0xFF7FD4FF);
+        drawRect(listX + listW - 16, target.lineY - 3, listX + listW - 12, target.lineY + 3, 0xFF7FD4FF);
     }
 
     private void drawLibrary(int mouseX, int mouseY) {
@@ -708,6 +884,11 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
                     "§e规则名",
                     "§7只是这条触发器规则的显示名称。",
                     "§7用于在左侧列表区分不同规则，不参与触发判定。");
+            y += 24;
+            drawField("所属分组", categoryField, y,
+                    "§e所属分组",
+                    "§7左侧规则树使用这个分组进行展示和拖动排序。",
+                    "§7留空会自动归到“未分组”；填写新名称会在保存前自动生成分组。");
             y += 24;
             y = drawSequenceRow(y);
             y = drawToggleRow(y);
@@ -1343,9 +1524,16 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) throws IOException {
+        if (treeContextMenuVisible) {
+            if (handleTreeContextMenuClick(mouseX, mouseY, mouseButton)) {
+                return;
+            }
+            closeTreeContextMenu();
+        }
         if (mouseButton == 0) {
             if (isInListCollapseButton(mouseX, mouseY)) {
                 listCollapsed = !listCollapsed;
+                resetRuleTreeDragState();
                 recalcLayout();
                 refreshButtons();
                 return;
@@ -1356,14 +1544,12 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
                 refreshButtons();
                 return;
             }
-            int ruleIndex = clickedRuleIndex(mouseX, mouseY);
-            if (ruleIndex >= 0) {
-                flushEditorToSelected();
-                recalcLayout();
-                selectedRuleIndex = ruleIndex;
-                loadFromRule(rules.get(selectedRuleIndex));
-                clearFieldFocus();
-                refreshButtons();
+            rebuildVisibleRuleTreeRows();
+            int treeRowIndex = clickedRuleTreeRowIndex(mouseX, mouseY);
+            if (treeRowIndex >= 0) {
+                pendingRuleTreePressIndex = treeRowIndex;
+                pendingRuleTreePressMouseX = mouseX;
+                pendingRuleTreePressMouseY = mouseY;
                 return;
             }
             int libIndex = clickedLibraryIndex(mouseX, mouseY);
@@ -1376,6 +1562,7 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
                     libraryScroll = clamp(libraryScroll, 0, maxLibraryScroll);
                 } else if (selectedRuleIndex >= 0 && selectedRuleIndex < rules.size()) {
                     rules.get(selectedRuleIndex).triggerType = item.type;
+                    rebuildVisibleRuleTreeRows();
                     loadFromRule(rules.get(selectedRuleIndex));
                     activeEditorTab = TAB_EVENT;
                     clearFieldFocus();
@@ -1403,6 +1590,21 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
                 refreshButtons();
                 return;
             }
+        } else if (mouseButton == 1) {
+            rebuildVisibleRuleTreeRows();
+            int treeRowIndex = clickedRuleTreeRowIndex(mouseX, mouseY);
+            if (!listCollapsed && isHoverRegion(mouseX, mouseY, listX, listY, listW, listH)) {
+                if (treeRowIndex >= 0 && treeRowIndex < visibleRuleTreeRows.size()) {
+                    RuleTreeRow row = visibleRuleTreeRows.get(treeRowIndex);
+                    if (row.type == RuleTreeRow.TYPE_GROUP) {
+                        openTreeContextMenu(mouseX, mouseY, row.category);
+                        return;
+                    }
+                } else {
+                    openTreeContextMenu(mouseX, mouseY, "");
+                    return;
+                }
+            }
         }
         super.mouseClicked(mouseX, mouseY, mouseButton);
         if (!libraryCollapsed && librarySearchField != null) {
@@ -1417,8 +1619,57 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
     }
 
     @Override
+    protected void mouseReleased(int mouseX, int mouseY, int state) {
+        if (state == 0) {
+            if (ruleTreeDragging) {
+                completeRuleTreeDrag();
+                resetRuleTreeDragState();
+                return;
+            }
+            if (pendingRuleTreePressIndex >= 0) {
+                handleRuleTreeClickByIndex(pendingRuleTreePressIndex);
+                pendingRuleTreePressIndex = -1;
+                return;
+            }
+        }
+        super.mouseReleased(mouseX, mouseY, state);
+    }
+
+    @Override
+    protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
+        if (clickedMouseButton == 0 && pendingRuleTreePressIndex >= 0 && !ruleTreeDragging) {
+            if (Math.abs(mouseX - pendingRuleTreePressMouseX) >= 4 || Math.abs(mouseY - pendingRuleTreePressMouseY) >= 4) {
+                rebuildVisibleRuleTreeRows();
+                RuleTreeRow row = pendingRuleTreePressIndex >= 0 && pendingRuleTreePressIndex < visibleRuleTreeRows.size()
+                        ? visibleRuleTreeRows.get(pendingRuleTreePressIndex)
+                        : null;
+                if (row != null && row.type == RuleTreeRow.TYPE_RULE && row.ruleIndex >= 0 && row.ruleIndex < rules.size()) {
+                    draggingRuleIndex = row.ruleIndex;
+                    sourceCategoryDragIndex = -1;
+                    ruleTreeDragging = true;
+                    currentRuleTreeDropTarget = computeRuleTreeDropTarget(mouseX, mouseY, draggingRuleIndex);
+                } else if (row != null && row.type == RuleTreeRow.TYPE_GROUP) {
+                    sourceCategoryDragIndex = indexOfCategory(row.category);
+                    draggingRuleIndex = -1;
+                    if (sourceCategoryDragIndex >= 0) {
+                        ruleTreeDragging = true;
+                        currentRuleTreeDropTarget = computeRuleTreeDropTarget(mouseX, mouseY, -1);
+                    }
+                }
+            }
+        } else if (ruleTreeDragging) {
+            currentRuleTreeDropTarget = computeRuleTreeDropTarget(mouseX, mouseY, draggingRuleIndex);
+        }
+        super.mouseClickMove(mouseX, mouseY, clickedMouseButton, timeSinceLastClick);
+    }
+
+    @Override
     protected void keyTyped(char typedChar, int keyCode) throws IOException {
         if (keyCode == Keyboard.KEY_ESCAPE) {
+            if (treeContextMenuVisible) {
+                closeTreeContextMenu();
+                return;
+            }
             mc.displayGuiScreen(parent);
             return;
         }
@@ -1454,8 +1705,9 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
         int mouseX = Mouse.getEventX() * this.width / this.mc.displayWidth;
         int mouseY = this.height - Mouse.getEventY() * this.height / this.mc.displayHeight - 1;
         if (!listCollapsed && isHoverRegion(mouseX, mouseY, listX, listY, listW, listH)) {
-            int visible = Math.max(1, (listH - 30) / (RULE_CARD_H + RULE_CARD_GAP));
-            maxListScroll = Math.max(0, rules.size() - visible);
+            rebuildVisibleRuleTreeRows();
+            int visible = getVisibleRuleTreeRowCount();
+            maxListScroll = Math.max(0, visibleRuleTreeRows.size() - visible);
             listScroll = clamp(listScroll + (dWheel < 0 ? 1 : -1), 0, maxListScroll);
         } else if (!libraryCollapsed && isHoverRegion(mouseX, mouseY, libraryX, libraryY, libraryW, libraryH)) {
             rebuildVisibleLibraryRows();
@@ -1471,23 +1723,426 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
         }
     }
 
-    private int clickedRuleIndex(int mouseX, int mouseY) {
+    private int clickedRuleTreeRowIndex(int mouseX, int mouseY) {
         if (listCollapsed) {
             return -1;
         }
-        int visible = Math.max(1, (listH - 30) / (RULE_CARD_H + RULE_CARD_GAP));
-        int rowY = listY + 24;
-        for (int i = 0; i < visible; i++) {
-            int idx = listScroll + i;
-            if (idx >= rules.size()) {
-                break;
+        rebuildVisibleRuleTreeRows();
+        int actualIndex = getRuleTreeRowIndexAt(mouseY);
+        if (actualIndex < 0 || actualIndex >= visibleRuleTreeRows.size()) {
+            return -1;
+        }
+        return isHoverRegion(mouseX, mouseY, listX + 6, getRuleTreeRowTop(actualIndex), listW - 14, RULE_TREE_ROW_H - 2)
+                ? actualIndex
+                : -1;
+    }
+
+    private void handleRuleTreeClickByIndex(int actualIndex) {
+        rebuildVisibleRuleTreeRows();
+        if (actualIndex < 0 || actualIndex >= visibleRuleTreeRows.size()) {
+            return;
+        }
+        RuleTreeRow row = visibleRuleTreeRows.get(actualIndex);
+        if (row.type == RuleTreeRow.TYPE_GROUP) {
+            if (collapsedRuleGroups.contains(row.category)) {
+                collapsedRuleGroups.remove(row.category);
+            } else {
+                collapsedRuleGroups.add(row.category);
             }
-            if (isHoverRegion(mouseX, mouseY, listX + 6, rowY, listW - 14, RULE_CARD_H)) {
-                return idx;
+            rebuildVisibleRuleTreeRows();
+            return;
+        }
+        if (row.type == RuleTreeRow.TYPE_ALL) {
+            return;
+        }
+        if (row.ruleIndex < 0 || row.ruleIndex >= rules.size()) {
+            return;
+        }
+        flushEditorToSelected();
+        recalcLayout();
+        selectedRuleIndex = row.ruleIndex;
+        loadFromRule(rules.get(selectedRuleIndex));
+        clearFieldFocus();
+        refreshButtons();
+    }
+
+    private RuleTreeDropTarget computeRuleTreeDropTarget(int mouseX, int mouseY, int sourceRuleIndex) {
+        if (!ruleTreeDragging || !isHoverRegion(mouseX, mouseY, listX, listY, listW, listH)) {
+            return null;
+        }
+        rebuildVisibleRuleTreeRows();
+        int actualIndex = getRuleTreeRowIndexAt(mouseY);
+        if (actualIndex < 0 || actualIndex >= visibleRuleTreeRows.size()) {
+            return null;
+        }
+        RuleTreeRow row = visibleRuleTreeRows.get(actualIndex);
+        if (row.type == RuleTreeRow.TYPE_ALL) {
+            return null;
+        }
+        if (sourceRuleIndex >= 0 && sourceRuleIndex < rules.size()) {
+            if (row.type == RuleTreeRow.TYPE_GROUP) {
+                boolean after = mouseY >= getRuleTreeRowTop(actualIndex) + RULE_TREE_ROW_H / 2;
+                int targetRuleIndex = after ? findLastRuleIndexForCategory(row.category)
+                        : findFirstRuleIndexForCategory(row.category);
+                int lineY = getRuleTreeRowTop(actualIndex) + (after ? RULE_TREE_ROW_H - 2 : 0);
+                return new RuleTreeDropTarget(row.category, targetRuleIndex, after, lineY, false);
             }
-            rowY += RULE_CARD_H + RULE_CARD_GAP;
+            if (row.ruleIndex == sourceRuleIndex) {
+                return null;
+            }
+            boolean after = mouseY >= getRuleTreeRowTop(actualIndex) + RULE_TREE_ROW_H / 2;
+            int lineY = getRuleTreeRowTop(actualIndex) + (after ? RULE_TREE_ROW_H - 2 : 0);
+            return new RuleTreeDropTarget(row.category, row.ruleIndex, after, lineY, false);
+        }
+        if (sourceCategoryDragIndex < 0 || sourceCategoryDragIndex >= categories.size()) {
+            return null;
+        }
+        if (row.type != RuleTreeRow.TYPE_GROUP) {
+            return null;
+        }
+        String draggedCategory = normalizeCategory(categories.get(sourceCategoryDragIndex));
+        if (draggedCategory.equalsIgnoreCase(normalizeCategory(row.category))) {
+            return null;
+        }
+        boolean after = mouseY >= getRuleTreeRowTop(actualIndex) + RULE_TREE_ROW_H / 2;
+        int lineY = getRuleTreeRowTop(actualIndex) + (after ? RULE_TREE_ROW_H - 2 : 0);
+        return new RuleTreeDropTarget(row.category, -1, after, lineY, true);
+    }
+
+    private int findFirstRuleIndexForCategory(String category) {
+        String normalized = normalizeCategory(category);
+        for (int i = 0; i < rules.size(); i++) {
+            if (normalized.equalsIgnoreCase(normalizeCategory(rules.get(i).category))) {
+                return i;
+            }
         }
         return -1;
+    }
+
+    private int findLastRuleIndexForCategory(String category) {
+        String normalized = normalizeCategory(category);
+        for (int i = rules.size() - 1; i >= 0; i--) {
+            if (normalized.equalsIgnoreCase(normalizeCategory(rules.get(i).category))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private void completeRuleTreeDrag() {
+        if (!ruleTreeDragging || currentRuleTreeDropTarget == null) {
+            return;
+        }
+        if (draggingRuleIndex >= 0) {
+            applyRuleTreeRuleDrag();
+        } else if (sourceCategoryDragIndex >= 0) {
+            applyRuleTreeCategoryDrag();
+        }
+    }
+
+    private void applyRuleTreeRuleDrag() {
+        if (draggingRuleIndex < 0 || draggingRuleIndex >= rules.size()) {
+            return;
+        }
+        LegacySequenceTriggerManager.RuleEditModel dragged = rules.get(draggingRuleIndex);
+        String targetCategory = normalizeCategory(currentRuleTreeDropTarget.category);
+        List<LegacySequenceTriggerManager.RuleEditModel> rebuilt = rebuildRuleOrderAfterDrag(dragged, targetCategory,
+                currentRuleTreeDropTarget.targetRuleIndex, currentRuleTreeDropTarget.after);
+        if (rebuilt.isEmpty()) {
+            return;
+        }
+        rules.clear();
+        rules.addAll(rebuilt);
+        selectedRuleIndex = rules.indexOf(dragged);
+        rebuildVisibleRuleTreeRows();
+        statusMessage = "§a已调整触发器规则顺序";
+    }
+
+    private void applyRuleTreeCategoryDrag() {
+        if (sourceCategoryDragIndex < 0 || sourceCategoryDragIndex >= categories.size()) {
+            return;
+        }
+        String moved = categories.remove(sourceCategoryDragIndex);
+        int targetIndex = indexOfCategory(currentRuleTreeDropTarget.category);
+        if (targetIndex < 0) {
+            categories.add(moved);
+        } else {
+            int insertIndex = currentRuleTreeDropTarget.after ? targetIndex + 1 : targetIndex;
+            if (sourceCategoryDragIndex < insertIndex) {
+                insertIndex--;
+            }
+            insertIndex = Math.max(0, Math.min(insertIndex, categories.size()));
+            categories.add(insertIndex, moved);
+        }
+        rebuildVisibleRuleTreeRows();
+        statusMessage = "§a已调整分组顺序";
+    }
+
+    private void resetRuleTreeDragState() {
+        pendingRuleTreePressIndex = -1;
+        pendingRuleTreePressMouseX = 0;
+        pendingRuleTreePressMouseY = 0;
+        ruleTreeDragging = false;
+        draggingRuleIndex = -1;
+        sourceCategoryDragIndex = -1;
+        currentRuleTreeDropTarget = null;
+    }
+
+    private void openTreeContextMenu(int mouseX, int mouseY, String targetCategory) {
+        treeContextMenuVisible = true;
+        treeContextMenuX = mouseX;
+        treeContextMenuY = mouseY;
+        treeContextTargetCategory = normalizeCategory(targetCategory);
+        treeContextMenuItems.clear();
+        treeContextMenuItems.add(new TreeContextMenuItem("new_group", "新建分组", true));
+        if (!targetCategory.trim().isEmpty()) {
+            treeContextMenuItems.add(new TreeContextMenuItem("rename_group", "重命名分组", true));
+            treeContextMenuItems.add(new TreeContextMenuItem("delete_group", "删除分组", true));
+        }
+    }
+
+    private void closeTreeContextMenu() {
+        treeContextMenuVisible = false;
+        treeContextTargetCategory = "";
+        treeContextMenuItems.clear();
+    }
+
+    private void drawTreeContextMenu(int mouseX, int mouseY) {
+        if (!treeContextMenuVisible || treeContextMenuItems.isEmpty()) {
+            return;
+        }
+        int height = treeContextMenuItems.size() * treeContextMenuItemHeight + 4;
+        int x = Math.min(treeContextMenuX, this.width - treeContextMenuWidth - 6);
+        int y = Math.min(treeContextMenuY, this.height - height - 6);
+        drawRect(x, y, x + treeContextMenuWidth, y + height, 0xEE15212B);
+        drawHorizontalLine(x, x + treeContextMenuWidth, y, 0xFF4FA6D9);
+        drawHorizontalLine(x, x + treeContextMenuWidth, y + height, 0xFF3C5E77);
+        drawVerticalLine(x, y, y + height, 0xFF3C5E77);
+        drawVerticalLine(x + treeContextMenuWidth, y, y + height, 0xFF3C5E77);
+        for (int i = 0; i < treeContextMenuItems.size(); i++) {
+            TreeContextMenuItem item = treeContextMenuItems.get(i);
+            int itemY = y + 2 + i * treeContextMenuItemHeight;
+            boolean hovered = mouseX >= x + 2 && mouseX <= x + treeContextMenuWidth - 2
+                    && mouseY >= itemY && mouseY <= itemY + treeContextMenuItemHeight - 1;
+            if (hovered) {
+                drawRect(x + 2, itemY, x + treeContextMenuWidth - 2, itemY + treeContextMenuItemHeight - 1, 0xCC2B5A7C);
+            }
+            drawString(fontRenderer, item.label, x + 8, itemY + 5, item.enabled ? 0xFFFFFFFF : 0xFF6B7C8C);
+        }
+    }
+
+    private boolean handleTreeContextMenuClick(int mouseX, int mouseY, int mouseButton) {
+        if (!treeContextMenuVisible) {
+            return false;
+        }
+        int height = treeContextMenuItems.size() * treeContextMenuItemHeight + 4;
+        int x = Math.min(treeContextMenuX, this.width - treeContextMenuWidth - 6);
+        int y = Math.min(treeContextMenuY, this.height - height - 6);
+        if (mouseX < x || mouseX > x + treeContextMenuWidth || mouseY < y || mouseY > y + height) {
+            return false;
+        }
+        if (mouseButton != 0) {
+            closeTreeContextMenu();
+            return true;
+        }
+        int index = (mouseY - (y + 2)) / treeContextMenuItemHeight;
+        if (index < 0 || index >= treeContextMenuItems.size()) {
+            closeTreeContextMenu();
+            return true;
+        }
+        TreeContextMenuItem item = treeContextMenuItems.get(index);
+        closeTreeContextMenu();
+        if (!item.enabled) {
+            return true;
+        }
+        handleTreeContextMenuAction(item.key);
+        return true;
+    }
+
+    private void handleTreeContextMenuAction(String key) {
+        if ("new_group".equals(key)) {
+            openAddCategoryDialog();
+            return;
+        }
+        if ("rename_group".equals(key)) {
+            openRenameCategoryDialog(treeContextTargetCategory);
+            return;
+        }
+        if ("delete_group".equals(key)) {
+            deleteCategory(treeContextTargetCategory);
+        }
+    }
+
+    private void openAddCategoryDialog() {
+        mc.displayGuiScreen(new GuiTextInput(this, "输入新分组名称", value -> {
+            if (safe(value).trim().isEmpty()) {
+                statusMessage = "§7已取消创建分组";
+                return;
+            }
+            String normalized = normalizeCategory(value);
+            if (indexOfCategory(normalized) >= 0) {
+                statusMessage = "§e分组已存在: " + normalized;
+                return;
+            }
+            ensureLocalCategoryExists(normalized);
+            collapsedRuleGroups.remove(normalized);
+            statusMessage = "§a已创建分组: " + normalized;
+        }));
+    }
+
+    private void openRenameCategoryDialog(String category) {
+        final String normalized = normalizeCategory(category);
+        mc.displayGuiScreen(new GuiTextInput(this, "重命名分组", normalized, value -> {
+            if (safe(value).trim().isEmpty()) {
+                statusMessage = "§7已取消重命名分组";
+                return;
+            }
+            String newName = normalizeCategory(value);
+            if (normalized.equalsIgnoreCase(newName)) {
+                statusMessage = "§7分组名称未变化";
+                return;
+            }
+            if (indexOfCategory(newName) >= 0) {
+                statusMessage = "§c分组名称已存在";
+                return;
+            }
+            int index = indexOfCategory(normalized);
+            if (index >= 0) {
+                categories.set(index, newName);
+            }
+            if (collapsedRuleGroups.remove(normalized)) {
+                collapsedRuleGroups.add(newName);
+            }
+            for (LegacySequenceTriggerManager.RuleEditModel rule : rules) {
+                if (normalizeCategory(rule.category).equalsIgnoreCase(normalized)) {
+                    rule.category = newName;
+                }
+            }
+            if (selectedRuleIndex >= 0 && selectedRuleIndex < rules.size()) {
+                categoryField.setText(normalizeCategory(rules.get(selectedRuleIndex).category));
+            }
+            statusMessage = "§a已重命名分组: " + normalized + " -> " + newName;
+        }));
+    }
+
+    private void deleteCategory(String category) {
+        String normalized = normalizeCategory(category);
+        if (LegacySequenceTriggerManager.CATEGORY_UNGROUPED.equalsIgnoreCase(normalized)) {
+            statusMessage = "§c未分组不能删除";
+            return;
+        }
+        categories.removeIf(value -> normalizeCategory(value).equalsIgnoreCase(normalized));
+        collapsedRuleGroups.remove(normalized);
+        for (LegacySequenceTriggerManager.RuleEditModel rule : rules) {
+            if (normalizeCategory(rule.category).equalsIgnoreCase(normalized)) {
+                rule.category = LegacySequenceTriggerManager.CATEGORY_UNGROUPED;
+            }
+        }
+        ensureLocalCategoriesSynced();
+        if (selectedRuleIndex >= 0 && selectedRuleIndex < rules.size()) {
+            categoryField.setText(normalizeCategory(rules.get(selectedRuleIndex).category));
+        }
+        statusMessage = "§a已删除分组: " + normalized;
+    }
+
+    private void ensureLocalCategoriesSynced() {
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        normalized.add(LegacySequenceTriggerManager.CATEGORY_UNGROUPED);
+        for (String category : categories) {
+            normalized.add(normalizeCategory(category));
+        }
+        for (LegacySequenceTriggerManager.RuleEditModel rule : rules) {
+            if (rule == null) {
+                continue;
+            }
+            rule.category = normalizeCategory(rule.category);
+            normalized.add(rule.category);
+        }
+        categories.clear();
+        categories.addAll(normalized);
+    }
+
+    private void ensureLocalCategoryExists(String category) {
+        String normalized = normalizeCategory(category);
+        if (indexOfCategory(normalized) < 0) {
+            categories.add(normalized);
+        }
+    }
+
+    private int indexOfCategory(String category) {
+        String normalized = normalizeCategory(category);
+        for (int i = 0; i < categories.size(); i++) {
+            if (normalizeCategory(categories.get(i)).equalsIgnoreCase(normalized)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private String getSelectedCategoryForNewRule() {
+        if (selectedRuleIndex >= 0 && selectedRuleIndex < rules.size()) {
+            return normalizeCategory(rules.get(selectedRuleIndex).category);
+        }
+        return LegacySequenceTriggerManager.CATEGORY_UNGROUPED;
+    }
+
+    private List<LegacySequenceTriggerManager.RuleEditModel> rebuildRuleOrderAfterDrag(
+            LegacySequenceTriggerManager.RuleEditModel dragged, String targetCategory, int targetRuleIndex,
+            boolean after) {
+        ensureLocalCategoryExists(targetCategory);
+        dragged.category = normalizeCategory(targetCategory);
+
+        java.util.LinkedHashMap<String, List<LegacySequenceTriggerManager.RuleEditModel>> grouped = new java.util.LinkedHashMap<>();
+        for (String category : categories) {
+            grouped.put(normalizeCategory(category), new ArrayList<>());
+        }
+        for (LegacySequenceTriggerManager.RuleEditModel rule : rules) {
+            if (rule == null || rule == dragged) {
+                continue;
+            }
+            String ruleCategory = normalizeCategory(rule.category);
+            List<LegacySequenceTriggerManager.RuleEditModel> group = grouped.get(ruleCategory);
+            if (group == null) {
+                group = new ArrayList<>();
+                grouped.put(ruleCategory, group);
+            }
+            group.add(rule);
+        }
+
+        List<LegacySequenceTriggerManager.RuleEditModel> targetGroup = grouped.get(normalizeCategory(targetCategory));
+        if (targetGroup == null) {
+            targetGroup = new ArrayList<>();
+            grouped.put(normalizeCategory(targetCategory), targetGroup);
+        }
+
+        int insertIndex = targetGroup.size();
+        if (targetRuleIndex >= 0 && targetRuleIndex < rules.size()) {
+            LegacySequenceTriggerManager.RuleEditModel targetRule = rules.get(targetRuleIndex);
+            insertIndex = targetGroup.indexOf(targetRule);
+            if (insertIndex < 0) {
+                insertIndex = targetGroup.size();
+            } else if (after) {
+                insertIndex++;
+            }
+        }
+        insertIndex = Math.max(0, Math.min(insertIndex, targetGroup.size()));
+        targetGroup.add(insertIndex, dragged);
+
+        List<LegacySequenceTriggerManager.RuleEditModel> rebuilt = new ArrayList<>();
+        for (String category : categories) {
+            List<LegacySequenceTriggerManager.RuleEditModel> group = grouped.get(normalizeCategory(category));
+            if (group != null) {
+                rebuilt.addAll(group);
+            }
+        }
+        for (List<LegacySequenceTriggerManager.RuleEditModel> group : grouped.values()) {
+            for (LegacySequenceTriggerManager.RuleEditModel rule : group) {
+                if (!rebuilt.contains(rule)) {
+                    rebuilt.add(rule);
+                }
+            }
+        }
+        return rebuilt;
     }
 
     private int clickedLibraryIndex(int mouseX, int mouseY) {
@@ -1628,7 +2283,7 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
 
     private List<GuiTextField> activeFields() {
         if (activeEditorTab == TAB_BASE) {
-            return Arrays.asList(nameField, sequenceField, cooldownField, containsField, noteField);
+            return Arrays.asList(nameField, categoryField, sequenceField, cooldownField, containsField, noteField);
         }
         if (activeEditorTab == TAB_EVENT) {
             return eventFieldsForSelectedType();
@@ -1742,17 +2397,29 @@ public class GuiLegacySequenceTriggerRules extends ThemedGuiScreen {
         return name.isEmpty() ? "(未命名规则)" : name;
     }
 
+    private String normalizeTriggerType(String type) {
+        return safe(type).trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizeCategory(String category) {
+        String normalized = safe(category).trim();
+        return normalized.isEmpty() ? LegacySequenceTriggerManager.CATEGORY_UNGROUPED : normalized;
+    }
+
     private int calculateRuleListWidth(int preferredLibraryW) {
         if (listCollapsed) {
             return getCollapsedSectionWidth("规则");
         }
         int widest = fontRenderer == null ? 120 : fontRenderer.getStringWidth("规则列表");
+        for (String category : categories) {
+            widest = Math.max(widest, fontRenderer == null ? widest : fontRenderer.getStringWidth(category + " (99)"));
+        }
         for (LegacySequenceTriggerManager.RuleEditModel rule : rules) {
             if (rule == null) {
                 continue;
             }
             String line1 = (rule.enabled ? "✔ " : "✘ ") + displayRuleName(rule);
-            String line2 = displayTriggerType(rule.triggerType) + " | " + safe(rule.sequenceName);
+            String line2 = normalizeCategory(rule.category) + " | " + safe(rule.sequenceName);
             widest = Math.max(widest, fontRenderer == null ? widest : fontRenderer.getStringWidth(line1));
             widest = Math.max(widest, fontRenderer == null ? widest : fontRenderer.getStringWidth(line2));
         }

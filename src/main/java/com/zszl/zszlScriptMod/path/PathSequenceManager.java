@@ -719,6 +719,7 @@ public class PathSequenceManager {
                     case "move_inventory_items_to_chest_slots":
                         int chestSlotCount = countIntListParam(params, "chestSlots", "chestSlotsText");
                         int inventorySlotCount = countIntListParam(params, "inventorySlots", "inventorySlotsText");
+                        List<String> moveChestExpressions = InventoryItemFilterExpressionEngine.readExpressions(params);
                         List<ItemFilterHandler.MoveChestFilterRule> moveChestRules = ItemFilterHandler
                                 .readMoveChestFilterRules(params);
                         String nbtTagMode = params.has("requiredNbtTagsMode")
@@ -735,7 +736,16 @@ public class PathSequenceManager {
                         String targetLabel = chestToInventory ? "背包" : "容器";
                         int targetSlotCount = chestToInventory ? inventorySlotCount : chestSlotCount;
                         StringBuilder moveChestFilter = new StringBuilder();
-                        if (moveChestRules.isEmpty()) {
+                        if (!moveChestExpressions.isEmpty()) {
+                            moveChestFilter.append("表达式")
+                                    .append(moveChestExpressions.size())
+                                    .append("条");
+                            String summary = InventoryItemFilterExpressionEngine
+                                    .summarizeExpressions(moveChestExpressions);
+                            if (!summary.isEmpty()) {
+                                moveChestFilter.append(" (首条: ").append(summary).append(")");
+                            }
+                        } else if (moveChestRules.isEmpty()) {
                             moveChestFilter.append("未设置");
                         } else {
                             moveChestFilter.append("规则").append(moveChestRules.size()).append("条");

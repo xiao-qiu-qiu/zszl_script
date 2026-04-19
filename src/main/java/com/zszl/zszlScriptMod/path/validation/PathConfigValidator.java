@@ -803,11 +803,15 @@ public final class PathConfigValidator {
             case "move_inventory_items_to_chest_slots":
                 validateNonNegativeIntParam(sequenceName, stepIndex, actionIndex, params, "delayTicks", "延迟",
                         variableContext, issues);
-                if (ItemFilterHandler.readMoveChestFilterRules(params).isEmpty()) {
+                List<String> moveChestExpressions = InventoryItemFilterExpressionEngine.readExpressions(params);
+                if (!moveChestExpressions.isEmpty()) {
+                    validateItemFilterExpressionList(sequenceName, stepIndex, actionIndex,
+                            moveChestExpressions, "物品过滤表达式", issues);
+                } else if (ItemFilterHandler.readMoveChestFilterRules(params).isEmpty()) {
                     issues.add(new Issue(Severity.ERROR, "move_chest_filter_missing", sequenceName, stepIndex,
                             actionIndex,
                             "容器物品批量移动缺少过滤条件",
-                            "至少需要添加一条有效规则；每条规则可填写物品名、NBT，或两者同时填写。"));
+                            "至少需要添加一条物品过滤表达式，或保留兼容旧版的物品名/NBT 规则。"));
                 }
                 break;
             case "window_click":

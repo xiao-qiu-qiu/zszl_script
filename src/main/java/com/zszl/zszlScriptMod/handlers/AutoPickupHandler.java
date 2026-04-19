@@ -93,6 +93,8 @@ public class AutoPickupHandler {
     private boolean lastItemSearchFoundMatch = false;
     private int lastItemMatchCachePruneTick = -99999;
     private final Map<Integer, ItemMatchCacheEntry> itemMatchCache = new HashMap<>();
+    private final Map<String, Integer> lastInventoryCounts = new HashMap<>();
+    private final Map<String, Integer> suppressedInventoryValidationUntilTick = new HashMap<>();
     private String pendingNavigationRuleKey = "";
     private ItemLocationKey pendingNavigationItemLocation = null;
     private int pendingNavigationEntityId = Integer.MIN_VALUE;
@@ -123,6 +125,16 @@ public class AutoPickupHandler {
             this.fingerprint = fingerprint;
             this.itemName = itemName;
             this.searchableText = searchableText;
+        }
+    }
+
+    private static final class InventoryCountEntry {
+        private final ItemStack sampleStack;
+        private int count;
+
+        private InventoryCountEntry(ItemStack sampleStack, int count) {
+            this.sampleStack = sampleStack == null ? ItemStack.EMPTY : sampleStack.copy();
+            this.count = Math.max(0, count);
         }
     }
 
@@ -408,6 +420,7 @@ public class AutoPickupHandler {
             // --- 核心修改 2: 进入新区域时，重置拾取标志 ---
             hasPickedUpAtLeastOneItem = false;
             // --- 修改结束 ---
+            captureEntryInventorySnapshot(mc.player);
             if (nowTick - lastEnterMessageTick > 60) {
                 mc.player.sendMessage(new TextComponentString(
                         TextFormatting.AQUA + "[自动拾取] " + TextFormatting.GREEN + "进入区域: " + activeRule.name));
@@ -436,6 +449,8 @@ public class AutoPickupHandler {
             }
             break;
         }
+
+        syncInventoryPickupValidation(nowTick);
     }
 
     public boolean shouldPrioritizeNavigation(EntityPlayerSP player) {
@@ -547,6 +562,7 @@ public class AutoPickupHandler {
                 mc.player.sendMessage(new TextComponentString("§d[调试] §7目标已拾取/消失，重新搜索..."));
             }
             hasPickedUpAtLeastOneItem = true;
+            suppressInventoryValidationForStack(pickedStack, nowTick + 4);
             currentTargetItem = null;
             currentTargetStackSnapshot = ItemStack.EMPTY;
             lastGotoTargetEntityId = Integer.MIN_VALUE;
@@ -619,6 +635,148 @@ public class AutoPickupHandler {
         lastNearestItemEntityId = Integer.MIN_VALUE;
         lastItemSearchFoundMatch = false;
         itemMatchCache.clear();
+        lastInventoryCounts.clear();
+        suppressedInventoryValidationUntilTick.clear();
+    }
+
+    private void captureEntryInventorySnapshot(EntityPlayerSP player) {
+        lastInventoryCounts.clear();
+        suppressedInventoryValidationUntilTick.clear();
+        if (player == null) {
+            return;
+        }
+        replaceLastInventorySnapshot(captureInventoryCounts(player));
+    }
+
+    private void syncInventoryPickupValidation(int nowTick) {
+        if (activeRule == null || mc.player == null) {
+            return;
+        }
+        pruneSuppressedInventoryValidation(nowTick);
+        Map<String, InventoryCountEntry> currentCounts = captureInventoryCounts(mc.player);
+        if (!hasInventoryCountChanged(currentCounts)) {
+            return;
+        }
+        for (Map.Entry<String, InventoryCountEntry> entry : currentCounts.entrySet()) {
+            String fingerprint = entry.getKey();
+            InventoryCountEntry current = entry.getValue();
+            if (current == null || current.count <= 0 || current.sampleStack == null || current.sampleStack.isEmpty()) {
+                continue;
+            }
+
+            int previousCount = Math.max(0, lastInventoryCounts.getOrDefault(fingerprint, 0));
+            int gained = current.count - previousCount;
+            if (gained <= 0) {
+                continue;
+            }
+
+            if (isInventoryValidationSuppressed(fingerprint, nowTick)) {
+                continue;
+            }
+
+            handleValidatedInventoryGain(current.sampleStack, gained);
+        }
+        replaceLastInventorySnapshot(currentCounts);
+    }
+
+    private void handleValidatedInventoryGain(ItemStack stack, int gainedCount) {
+        if (stack == null || stack.isEmpty()) {
+            return;
+        }
+        if (!isStackEligibleForRule(stack, activeRule)) {
+            return;
+        }
+        hasPickedUpAtLeastOneItem = true;
+        if (ModConfig.isDebugFlagEnabled(DebugModule.AUTO_PICKUP) && mc.player != null) {
+            mc.player.sendMessage(new TextComponentString(
+                    TextFormatting.LIGHT_PURPLE + "[调试] "
+                            + TextFormatting.GRAY + "背包新增校验命中: "
+                            + TextFormatting.WHITE + stack.getDisplayName()
+                            + TextFormatting.GRAY + " x"
+                            + TextFormatting.WHITE + gainedCount));
+        }
+        tryTriggerPickupActionSequence(stack.copy());
+    }
+
+    private Map<String, InventoryCountEntry> captureInventoryCounts(EntityPlayerSP player) {
+        Map<String, InventoryCountEntry> counts = new HashMap<>();
+        if (player == null || player.inventory == null || player.inventory.mainInventory == null) {
+            return counts;
+        }
+        List<ItemStack> mainInventory = player.inventory.mainInventory;
+        for (ItemStack stack : mainInventory) {
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            String fingerprint = buildItemFingerprint(stack);
+            if (fingerprint.isEmpty()) {
+                continue;
+            }
+            InventoryCountEntry entry = counts.get(fingerprint);
+            if (entry == null) {
+                counts.put(fingerprint, new InventoryCountEntry(stack, stack.getCount()));
+            } else {
+                entry.count += Math.max(0, stack.getCount());
+            }
+        }
+        return counts;
+    }
+
+    private void suppressInventoryValidationForStack(ItemStack stack, int expireTick) {
+        if (stack == null || stack.isEmpty()) {
+            return;
+        }
+        String fingerprint = buildItemFingerprint(stack);
+        if (fingerprint.isEmpty()) {
+            return;
+        }
+        suppressedInventoryValidationUntilTick.put(fingerprint, Math.max(0, expireTick));
+    }
+
+    private boolean isInventoryValidationSuppressed(String fingerprint, int nowTick) {
+        if (fingerprint == null || fingerprint.isEmpty()) {
+            return false;
+        }
+        Integer expireTick = suppressedInventoryValidationUntilTick.get(fingerprint);
+        return expireTick != null && expireTick >= nowTick;
+    }
+
+    private void pruneSuppressedInventoryValidation(int nowTick) {
+        List<String> expired = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : suppressedInventoryValidationUntilTick.entrySet()) {
+            if (entry.getValue() == null || entry.getValue() < nowTick) {
+                expired.add(entry.getKey());
+            }
+        }
+        for (String fingerprint : expired) {
+            suppressedInventoryValidationUntilTick.remove(fingerprint);
+        }
+    }
+
+    private boolean hasInventoryCountChanged(Map<String, InventoryCountEntry> currentCounts) {
+        if (currentCounts.size() != lastInventoryCounts.size()) {
+            return true;
+        }
+        for (Map.Entry<String, InventoryCountEntry> entry : currentCounts.entrySet()) {
+            InventoryCountEntry current = entry.getValue();
+            int currentCount = current == null ? 0 : Math.max(0, current.count);
+            if (Math.max(0, lastInventoryCounts.getOrDefault(entry.getKey(), 0)) != currentCount) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void replaceLastInventorySnapshot(Map<String, InventoryCountEntry> snapshot) {
+        lastInventoryCounts.clear();
+        if (snapshot == null || snapshot.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, InventoryCountEntry> entry : snapshot.entrySet()) {
+            if (entry.getValue() != null && entry.getValue().count > 0) {
+                lastInventoryCounts.put(entry.getKey(), entry.getValue().count);
+            }
+        }
     }
 
     private AutoPickupRule resolveRuleForPlayer(EntityPlayerSP player, List<AutoPickupRule> rulesSnapshot) {
@@ -734,8 +892,20 @@ public class AutoPickupHandler {
         }
 
         ItemMatchCacheEntry cacheEntry = getItemMatchCacheEntry(item);
-        String itemName = cacheEntry.itemName;
-        String searchableText = cacheEntry.searchableText;
+        return matchesRuleFilters(rule, cacheEntry.itemName, cacheEntry.searchableText);
+    }
+
+    private boolean isStackEligibleForRule(ItemStack stack, AutoPickupRule rule) {
+        if (stack == null || stack.isEmpty() || rule == null) {
+            return false;
+        }
+        return matchesRuleFilters(rule, getFilterableItemName(stack), ItemFilterHandler.buildItemSearchableText(stack));
+    }
+
+    private boolean matchesRuleFilters(AutoPickupRule rule, String itemName, String searchableText) {
+        if (rule == null) {
+            return false;
+        }
         if (rule.enableItemBlacklist && matchesRuleEntryList(itemName, searchableText, rule.itemBlacklistEntries)) {
             return false;
         }
@@ -1414,13 +1584,21 @@ public class AutoPickupHandler {
         if (item == null) {
             return "";
         }
+        return getFilterableItemName(item.getItem());
+    }
 
-        String displayName = item.getItem() == null ? "" : item.getItem().getDisplayName();
-        String normalized = KillAuraHandler.normalizeFilterName(displayName);
+    private static String getFilterableItemName(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return "";
+        }
+        String normalized = KillAuraHandler.normalizeFilterName(stack.getDisplayName());
         if (!normalized.isEmpty()) {
             return normalized;
         }
-        return KillAuraHandler.normalizeFilterName(item.getName()).toLowerCase(Locale.ROOT);
+        if (stack.getItem() != null && stack.getItem().getRegistryName() != null) {
+            return KillAuraHandler.normalizeFilterName(stack.getItem().getRegistryName().toString());
+        }
+        return "";
     }
 
     private void drawPickupRadiusAura(double centerX, double centerY, double centerZ, double viewerX, double viewerY,
