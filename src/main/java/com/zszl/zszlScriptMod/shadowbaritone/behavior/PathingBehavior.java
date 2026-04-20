@@ -404,6 +404,19 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (doIt) {
             secretInternalSegmentCancel();
         }
+        synchronized (pathCalcLock) {
+            if (inProgress != null) {
+                inProgress.cancel();
+                inProgress = null;
+            }
+        }
+        synchronized (pathPlanLock) {
+            next = null;
+        }
+        // Clear the retained render goal immediately so GUI-triggered stop behaves the
+        // same as a manual "stop/cancel" command even if a pause process had been active.
+        secretInternalSetGoal(null);
+        context = null;
         baritone.getPathingControlManager().cancelEverything(); // regardless of if we can stop the current segment, we
                                                                 // can still stop the processes
         return doIt;

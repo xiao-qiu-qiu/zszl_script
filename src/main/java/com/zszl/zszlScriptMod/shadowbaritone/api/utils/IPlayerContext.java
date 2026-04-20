@@ -18,6 +18,7 @@
 package com.zszl.zszlScriptMod.shadowbaritone.api.utils;
 
 import com.zszl.zszlScriptMod.shadowbaritone.api.cache.IWorldData;
+import net.minecraft.block.BlockLiquid;
 import net.minecraft.block.BlockSlab;
 import net.minecraft.block.BlockStairs;
 import net.minecraft.block.state.IBlockState;
@@ -53,9 +54,14 @@ public interface IPlayerContext {
     default BetterBlockPos playerFeet() {
         // TODO find a better way to deal with soul sand!!!!!
         BetterBlockPos feet = new BetterBlockPos(player().posX, player().posY + 0.1251, player().posZ);
-        BetterBlockPos footprintFeet = resolveFootprintStandingPos(feet);
-        if (footprintFeet != null) {
-            feet = footprintFeet;
+        BetterBlockPos liquidFeet = resolveLiquidFootprintPos();
+        if (liquidFeet != null) {
+            feet = liquidFeet;
+        } else {
+            BetterBlockPos footprintFeet = resolveFootprintStandingPos(feet);
+            if (footprintFeet != null) {
+                feet = footprintFeet;
+            }
         }
 
         // sometimes when calling this from another thread or while world is null, it'll
@@ -80,6 +86,65 @@ public interface IPlayerContext {
         }
 
         return feet;
+    }
+
+    default BetterBlockPos resolveLiquidFootprintPos() {
+        if (player() == null || world() == null) {
+            return null;
+        }
+        AxisAlignedBB boundingBox = player().getEntityBoundingBox();
+        if (boundingBox == null) {
+            return null;
+        }
+
+        double epsilon = 1.0E-4D;
+        double minX = boundingBox.minX + epsilon;
+        double maxX = boundingBox.maxX - epsilon;
+        double minZ = boundingBox.minZ + epsilon;
+        double maxZ = boundingBox.maxZ - epsilon;
+        if (maxX < minX) {
+            minX = maxX = player().posX;
+        }
+        if (maxZ < minZ) {
+            minZ = maxZ = player().posZ;
+        }
+
+        int minBlockX = MathHelper.floor(minX);
+        int maxBlockX = MathHelper.floor(maxX);
+        int minBlockZ = MathHelper.floor(minZ);
+        int maxBlockZ = MathHelper.floor(maxZ);
+        int liquidY = MathHelper.floor(boundingBox.minY + epsilon);
+
+        BetterBlockPos best = null;
+        double bestOverlap = -1.0D;
+        double bestDistanceSq = Double.POSITIVE_INFINITY;
+
+        for (int x = minBlockX; x <= maxBlockX; x++) {
+            for (int z = minBlockZ; z <= maxBlockZ; z++) {
+                BetterBlockPos candidate = new BetterBlockPos(x, liquidY, z);
+                if (!isLiquidFootCandidate(candidate)) {
+                    continue;
+                }
+
+                double overlapX = overlapLength(minX, maxX, x, x + 1.0D);
+                double overlapZ = overlapLength(minZ, maxZ, z, z + 1.0D);
+                double overlapArea = overlapX * overlapZ;
+                double dx = (candidate.x + 0.5D) - player().posX;
+                double dz = (candidate.z + 0.5D) - player().posZ;
+                double distanceSq = dx * dx + dz * dz;
+
+                if (best == null
+                        || overlapArea > bestOverlap + 1.0E-6D
+                        || (Math.abs(overlapArea - bestOverlap) <= 1.0E-6D
+                                && distanceSq < bestDistanceSq - 1.0E-6D)) {
+                    best = candidate;
+                    bestOverlap = overlapArea;
+                    bestDistanceSq = distanceSq;
+                }
+            }
+        }
+
+        return best;
     }
 
     default BetterBlockPos resolveFootprintStandingPos(BetterBlockPos defaultFeet) {
@@ -178,6 +243,17 @@ public interface IPlayerContext {
                     || groundState.getBlock() instanceof BlockSlab
                     || groundState.getBlock() instanceof BlockStairs;
             return feetPassable && headPassable && hasGround;
+        } catch (NullPointerException ignored) {
+            return false;
+        }
+    }
+
+    default boolean isLiquidFootCandidate(BetterBlockPos candidate) {
+        if (candidate == null) {
+            return false;
+        }
+        try {
+            return world().getBlockState(candidate).getBlock() instanceof BlockLiquid;
         } catch (NullPointerException ignored) {
             return false;
         }

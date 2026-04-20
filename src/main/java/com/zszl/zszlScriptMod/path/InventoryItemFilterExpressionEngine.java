@@ -724,8 +724,9 @@ public final class InventoryItemFilterExpressionEngine {
             Object value = parseAnd();
             while (true) {
                 skipWhitespace();
-                if (match("||") || match("|")) {
-                    value = toBoolean(value) || toBoolean(parseAnd());
+                if (matchAny("||", "|", "｜｜", "｜")) {
+                    Object right = parseAnd();
+                    value = toBoolean(value) || toBoolean(right);
                 } else {
                     return value;
                 }
@@ -736,8 +737,9 @@ public final class InventoryItemFilterExpressionEngine {
             Object value = parseComparison();
             while (true) {
                 skipWhitespace();
-                if (match("&&") || match("&")) {
-                    value = toBoolean(value) && toBoolean(parseComparison());
+                if (matchAny("&&", "&", "＆＆", "＆")) {
+                    Object right = parseComparison();
+                    value = toBoolean(value) && toBoolean(right);
                 } else {
                     return value;
                 }
@@ -789,7 +791,7 @@ public final class InventoryItemFilterExpressionEngine {
 
         private Object parseUnary() {
             skipWhitespace();
-            if (match("!")) {
+            if (matchAny("!", "！")) {
                 return !toBoolean(parseUnary());
             }
             if (match("+")) {
@@ -807,10 +809,10 @@ public final class InventoryItemFilterExpressionEngine {
                 throw error("表达式缺少值");
             }
 
-            if (match("(")) {
+            if (matchAny("(", "（")) {
                 Object value = parseOr();
                 skipWhitespace();
-                if (!match(")")) {
+                if (!matchAny(")", "）")) {
                     throw error("缺少右括号");
                 }
                 return value;
@@ -831,7 +833,7 @@ public final class InventoryItemFilterExpressionEngine {
             }
 
             skipWhitespace();
-            if (match("(")) {
+            if (matchAny("(", "（")) {
                 return parseFunctionCall(token);
             }
 
@@ -899,12 +901,12 @@ public final class InventoryItemFilterExpressionEngine {
                     current.append(c);
                     continue;
                 }
-                if (c == '(') {
+                if (c == '(' || c == '（') {
                     nestedLevel++;
                     current.append(c);
                     continue;
                 }
-                if (c == ')') {
+                if (c == ')' || c == '）') {
                     if (nestedLevel == 0) {
                         addRawArg(args, current);
                         return args;
@@ -913,7 +915,7 @@ public final class InventoryItemFilterExpressionEngine {
                     current.append(c);
                     continue;
                 }
-                if (c == ',' && nestedLevel == 0) {
+                if ((c == ',' || c == '，') && nestedLevel == 0) {
                     addRawArg(args, current);
                     continue;
                 }
@@ -1463,9 +1465,14 @@ public final class InventoryItemFilterExpressionEngine {
             StringBuilder builder = new StringBuilder();
             while (index < expression.length()) {
                 char c = expression.charAt(index);
-                if (Character.isWhitespace(c) || c == '(' || c == ')' || c == '&' || c == '|' || c == '='
-                        || c == '!' || c == '>' || c == '<' || c == ',' || c == '+'
-                        || c == '-' || c == '*' || c == '/' || c == '%') {
+                if (Character.isWhitespace(c)
+                        || c == '(' || c == ')' || c == '（' || c == '）'
+                        || c == '&' || c == '|' || c == '＆' || c == '｜'
+                        || c == '=' || c == '!' || c == '>' || c == '<'
+                        || c == '＝' || c == '！' || c == '＞' || c == '＜'
+                        || c == ',' || c == '，'
+                        || c == '+' || c == '-' || c == '*' || c == '/' || c == '%'
+                        || c == '＋' || c == '－' || c == '＊' || c == '／' || c == '％') {
                     break;
                 }
                 builder.append(c);
@@ -1475,11 +1482,12 @@ public final class InventoryItemFilterExpressionEngine {
         }
 
         private String tryParseOperator() {
-            String[] operators = new String[] { "==", "!=", ">=", "<=", ">", "<" };
+            String[] operators = new String[] { "==", "!=", ">=", "<=", ">", "<", "＝＝", "！＝", "＞＝", "＜＝",
+                    "＞", "＜" };
             for (String operator : operators) {
                 if (expression.regionMatches(index, operator, 0, operator.length())) {
                     index += operator.length();
-                    return operator;
+                    return normalizeOperator(operator);
                 }
             }
             return null;
@@ -1571,6 +1579,18 @@ public final class InventoryItemFilterExpressionEngine {
             if (expression.regionMatches(index, token, 0, token.length())) {
                 index += token.length();
                 return true;
+            }
+            return false;
+        }
+
+        private boolean matchAny(String... tokens) {
+            if (tokens == null) {
+                return false;
+            }
+            for (String token : tokens) {
+                if (token != null && match(token)) {
+                    return true;
+                }
             }
             return false;
         }
@@ -1779,6 +1799,28 @@ public final class InventoryItemFilterExpressionEngine {
             return text.length() >= 2 ? text.substring(1, text.length() - 1) : "";
         }
         return text;
+    }
+
+    private static String normalizeOperator(String operator) {
+        if ("＝＝".equals(operator)) {
+            return "==";
+        }
+        if ("！＝".equals(operator)) {
+            return "!=";
+        }
+        if ("＞＝".equals(operator)) {
+            return ">=";
+        }
+        if ("＜＝".equals(operator)) {
+            return "<=";
+        }
+        if ("＞".equals(operator)) {
+            return ">";
+        }
+        if ("＜".equals(operator)) {
+            return "<";
+        }
+        return operator;
     }
 
     private static String normalizeSymbol(String raw) {

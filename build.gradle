@@ -70,6 +70,7 @@ dependencies {
     // Build against the latest 1.12.2 Forge toolchain available to this project.
     // Older 1.12.2 runtime compatibility is handled in code where helper signatures differ.
     minecraft 'net.minecraftforge:forge:1.12.2-14.23.5.2860'
+    testImplementation 'junit:junit:4.13.2'
     embed 'org.jsoup:jsoup:1.15.3'
     embed 'com.vladsch.flexmark:flexmark:0.62.2'
     embed 'com.google.guava:guava:31.1-jre'

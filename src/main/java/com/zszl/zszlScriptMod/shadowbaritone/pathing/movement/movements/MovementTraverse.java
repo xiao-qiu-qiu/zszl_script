@@ -298,21 +298,28 @@ public class MovementTraverse extends Movement {
 
         boolean isTheBridgeBlockThere = MovementHelper.canWalkOn(ctx, positionToPlace) || ladder
                 || MovementHelper.canUseFrostWalker(ctx, positionToPlace);
-        BlockPos feet = ctx.playerFeet();
-        if (feet.getY() != dest.getY() && !ladder) {
+        BlockPos actualFeet = ctx.playerFeet();
+        BlockPos pathFeet = adjustFeetForLiquidTraversal(actualFeet);
+        if (pathFeet.getY() != dest.getY() && !ladder) {
             logDebug("Wrong Y coordinate");
-            if (feet.getY() < dest.getY()) {
+            if (pathFeet.getY() < dest.getY()) {
+                // Swimming players are often resolved one block lower than the route node even
+                // though the current movement is still a valid horizontal traverse. Keep forward
+                // pressure while surfacing instead of stalling on pure jump input.
+                if (MovementHelper.isLiquid(ctx, actualFeet)) {
+                    MovementHelper.moveTowards(ctx, state, positionsToBreak[0]);
+                }
                 return state.setInput(Input.JUMP, true);
             }
             return state;
         }
 
         if (isTheBridgeBlockThere) {
-            if (feet.equals(dest)) {
+            if (pathFeet.equals(dest)) {
                 return state.setStatus(MovementStatus.SUCCESS);
             }
-            if (Baritone.settings().overshootTraverse.value && (feet.equals(dest.add(getDirection()))
-                    || feet.equals(dest.add(getDirection()).add(getDirection())))) {
+            if (Baritone.settings().overshootTraverse.value && (pathFeet.equals(dest.add(getDirection()))
+                    || pathFeet.equals(dest.add(getDirection()).add(getDirection())))) {
                 return state.setStatus(MovementStatus.SUCCESS);
             }
             Block low = BlockStateInterface.get(ctx, src).getBlock();
@@ -327,7 +334,7 @@ public class MovementTraverse extends Movement {
             Block intoBelow = BlockStateInterface.get(ctx, into).getBlock();
             Block intoAbove = BlockStateInterface.get(ctx, into.up()).getBlock();
             if (wasTheBridgeBlockAlwaysThere
-                    && (!MovementHelper.isLiquid(ctx, feet) || Baritone.settings().sprintInWater.value)
+                    && (!MovementHelper.isLiquid(ctx, actualFeet) || Baritone.settings().sprintInWater.value)
                     && (!MovementHelper.avoidWalkingInto(intoBelow) || MovementHelper.isWater(intoBelow))
                     && !MovementHelper.avoidWalkingInto(intoAbove)) {
                 state.setInput(Input.SPRINT, true);
@@ -335,7 +342,7 @@ public class MovementTraverse extends Movement {
 
             IBlockState destDown = BlockStateInterface.get(ctx, dest.down());
             BlockPos against = positionsToBreak[0];
-            if (feet.getY() != dest.getY() && ladder
+            if (pathFeet.getY() != dest.getY() && ladder
                     && (destDown.getBlock() == Blocks.VINE || destDown.getBlock() == Blocks.LADDER)) {
                 against = destDown.getBlock() == Blocks.VINE
                         ? MovementPillar.getAgainst(new CalculationContext(baritone), dest.down())
@@ -349,7 +356,7 @@ public class MovementTraverse extends Movement {
             return state;
         } else {
             wasTheBridgeBlockAlwaysThere = false;
-            Block standingOn = BlockStateInterface.get(ctx, feet.down()).getBlock();
+            Block standingOn = BlockStateInterface.get(ctx, actualFeet.down()).getBlock();
             if (standingOn.equals(Blocks.SOUL_SAND) || standingOn instanceof BlockSlab) { // see issue #118
                 double dist = Math.max(Math.abs(dest.getX() + 0.5 - ctx.player().posX),
                         Math.abs(dest.getZ() + 0.5 - ctx.player().posZ));
@@ -390,7 +397,7 @@ public class MovementTraverse extends Movement {
                 default:
                     break;
             }
-            if (feet.equals(dest)) {
+            if (pathFeet.equals(dest)) {
                 // If we are in the block that we are trying to get to, we are sneaking over air
                 // and we need to place a block beneath us against the one we just walked off of
                 // Out.log(from + " " + to + " " + faceX + "," + faceY + "," + faceZ + " " +
@@ -431,6 +438,18 @@ public class MovementTraverse extends Movement {
             // dont spin around and walk forwards then spin around and place backwards for
             // every block
         }
+    }
+
+    private BlockPos adjustFeetForLiquidTraversal(BlockPos feet) {
+        if (feet == null) {
+            return null;
+        }
+        BetterBlockPos betterFeet = new BetterBlockPos(feet);
+        BetterBlockPos shifted = betterFeet.up();
+        if (MovementHelper.isLiquid(ctx, betterFeet) && getValidPositions().contains(shifted)) {
+            return shifted;
+        }
+        return feet;
     }
 
     @Override

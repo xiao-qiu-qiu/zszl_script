@@ -1081,7 +1081,8 @@ public class NodeSequenceRunner {
             while (true) {
                 skipWhitespace();
                 if (match("||")) {
-                    value = value || parseAnd();
+                    boolean right = parseAnd();
+                    value = value || right;
                 } else {
                     return value;
                 }
@@ -1093,7 +1094,8 @@ public class NodeSequenceRunner {
             while (true) {
                 skipWhitespace();
                 if (match("&&")) {
-                    value = value && parsePrimary();
+                    boolean right = parsePrimary();
+                    value = value && right;
                 } else {
                     return value;
                 }
